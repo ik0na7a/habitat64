@@ -6,24 +6,30 @@ const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 const HEADERS = { "Content-Type": "application/json", "X-Access-Key": BIN_KEY };
 const LS_KEY  = "habitat64_data";
 
-function lsSave(data) { try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {} }
+function lsSave(d) { try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch {} }
 function lsLoad() { try { const d = localStorage.getItem(LS_KEY); return d ? JSON.parse(d) : null; } catch { return null; } }
 async function binSave(data) {
   const res = await fetch(BIN_URL, { method:"PUT", headers:HEADERS, body:JSON.stringify(data) });
-  if (!res.ok) throw new Error(`${res.status}`);
+  if (!res.ok) throw new Error(res.status);
 }
 async function binLoad() {
   const res = await fetch(`${BIN_URL}/latest`, { headers:HEADERS });
-  if (!res.ok) throw new Error(`${res.status}`);
-  const json = await res.json();
-  return json.record;
+  if (!res.ok) throw new Error(res.status);
+  return (await res.json()).record;
 }
 
 const EMOJIS = ["🍬","🥛","💧","🫙","🍚","🧃","🥤","🍫","🥚","🧀","🌽","🍎","🧴","🫧","🧹"];
+const fmt = n => `${(+n||0).toFixed(2)} €`;
 
+// ── THUMB ─────────────────────────────────────────────────────
 function Thumb({ p, size=52 }) {
   const em = EMOJIS[(p.id-1)%EMOJIS.length]||"📦";
-  if (p.image) return <img src={p.image} alt={p.name} style={{ width:size,height:size,borderRadius:10,objectFit:"cover",flexShrink:0 }} />;
+  const [err, setErr] = useState(false);
+  if (p.image && !err) {
+    return <img src={p.image} alt={p.name}
+      onError={()=>setErr(true)}
+      style={{ width:size,height:size,borderRadius:10,objectFit:"cover",flexShrink:0 }} />;
+  }
   return <div style={{ width:size,height:size,borderRadius:10,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.46,flexShrink:0 }}>{em}</div>;
 }
 
@@ -34,12 +40,20 @@ function Badge({ t, children }) {
 
 function Btn({ v="pri", sm, onClick, children, style={}, full }) {
   const base = { cursor:"pointer",borderRadius:10,fontFamily:"'DM Sans',sans-serif",fontWeight:600,fontSize:sm?"0.80rem":"0.90rem",padding:sm?"8px 14px":"11px 20px",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,border:"none",width:full?"100%":"auto",...style };
-  const vs = { pri:{background:"#f0c040",color:"#0f0f14"},sec:{background:"#1e1e2a",color:"#e8e8f0",border:"1px solid #2a2a38"},del:{background:"rgba(248,113,113,0.15)",color:"#f87171",border:"1px solid rgba(248,113,113,0.3)"},teal:{background:"rgba(78,205,196,0.15)",color:"#4ecdc4",border:"1px solid rgba(78,205,196,0.3)"},edit:{background:"rgba(240,192,64,0.12)",color:"#f0c040",border:"1px solid rgba(240,192,64,0.3)"} };
+  const vs = {
+    pri:  { background:"#f0c040",color:"#0f0f14" },
+    sec:  { background:"#1e1e2a",color:"#e8e8f0",border:"1px solid #2a2a38" },
+    del:  { background:"rgba(248,113,113,0.15)",color:"#f87171",border:"1px solid rgba(248,113,113,0.3)" },
+    teal: { background:"rgba(78,205,196,0.15)",color:"#4ecdc4",border:"1px solid rgba(78,205,196,0.3)" },
+    edit: { background:"rgba(240,192,64,0.12)",color:"#f0c040",border:"1px solid rgba(240,192,64,0.3)" },
+  };
   return <button style={{ ...base,...vs[v] }} onClick={onClick}>{children}</button>;
 }
 
 const IS = { width:"100%",background:"#1e1e2a",border:"1px solid #2a2a38",color:"#e8e8f0",borderRadius:10,padding:"12px 14px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.93rem",outline:"none" };
-function FG({ label, children }) { return <div style={{ marginBottom:14 }}><label style={{ display:"block",fontSize:"0.70rem",color:"#8888a0",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.6px" }}>{label}</label>{children}</div>; }
+function FG({ label, children }) {
+  return <div style={{ marginBottom:14 }}><label style={{ display:"block",fontSize:"0.70rem",color:"#8888a0",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.6px" }}>{label}</label>{children}</div>;
+}
 
 function Modal({ open, onClose, title, children, footer }) {
   if (!open) return null;
@@ -55,147 +69,173 @@ function Modal({ open, onClose, title, children, footer }) {
   );
 }
 
-function ImgUpload({ val, onChange }) {
-  const ref = useRef();
-  return (
-    <div>
-      <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:10 }}>
-        <div style={{ width:72,height:72,borderRadius:14,background:"#1a1a24",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"2rem",flexShrink:0,border:"1px solid #2a2a38" }}>
-          {val?<img src={val} style={{ width:"100%",height:"100%",objectFit:"cover" }} />:"📷"}
-        </div>
-        <Btn v="sec" style={{ flex:1 }} onClick={()=>ref.current.click()}>📁 Качи снимка</Btn>
-      </div>
-      <input style={IS} placeholder="или URL на снимка (https://...)" value={val} onChange={e=>onChange(e.target.value)} />
-      <input ref={ref} type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>onChange(ev.target.result); r.readAsDataURL(f); }} />
-    </div>
-  );
-}
-
 function StatusBar({ status }) {
-  const cfg = { saving:{bg:"rgba(240,192,64,0.15)",border:"rgba(240,192,64,0.4)",color:"#f0c040",text:"💾 Запазва се..."},saved:{bg:"rgba(74,222,128,0.12)",border:"rgba(74,222,128,0.35)",color:"#4ade80",text:"✓ Запазено"},error:{bg:"rgba(248,113,113,0.15)",border:"rgba(248,113,113,0.4)",color:"#f87171",text:"⚠ Запазено локално"},syncing:{bg:"rgba(78,205,196,0.12)",border:"rgba(78,205,196,0.35)",color:"#4ecdc4",text:"🔄 Синхронизира..."} };
+  const cfg = {
+    saving:  { bg:"rgba(240,192,64,0.15)",  border:"rgba(240,192,64,0.4)",  color:"#f0c040", text:"💾 Запазва се..." },
+    saved:   { bg:"rgba(74,222,128,0.12)",  border:"rgba(74,222,128,0.35)", color:"#4ade80", text:"✓ Запазено" },
+    error:   { bg:"rgba(248,113,113,0.15)", border:"rgba(248,113,113,0.4)", color:"#f87171", text:"⚠ Запазено локално" },
+    syncing: { bg:"rgba(78,205,196,0.12)",  border:"rgba(78,205,196,0.35)", color:"#4ecdc4", text:"🔄 Синхронизира..." },
+  };
   if (!status||!cfg[status]) return null;
-  const c=cfg[status];
+  const c = cfg[status];
   return <div style={{ position:"fixed",top:62,right:12,background:c.bg,border:`1px solid ${c.border}`,borderRadius:8,padding:"5px 12px",fontSize:"0.72rem",color:c.color,zIndex:150,fontWeight:600 }}>{c.text}</div>;
 }
 
+// ══════════════════════════════════════════════════════════════
 export default function App() {
-  const [ready,setReady]=useState(false);
-  const [syncStatus,setSyncStatus]=useState("syncing");
-  const [page,setPage]=useState("dashboard");
-  const [products,setProducts]=useState([]);
-  const [stores,setStores]=useState([]);
-  const [storeStock,setStoreStock]=useState({});
-  const [orders,setOrders]=useState([]);
-  const [nextId,setNextId]=useState(1001);
-  const [mProd,setMProd]=useState(false);
-  const [mStore,setMStore]=useState(false);
-  const [mOrder,setMOrder]=useState(false);
-  const [mRestock,setMRestock]=useState(false);
-  const [mSD,setMSD]=useState(null);
-  // EDIT PRODUCT MODAL
-  const [mEdit,setMEdit]=useState(null); // holds product being edited
+  const [ready,       setReady]       = useState(false);
+  const [syncStatus,  setSyncStatus]  = useState("syncing");
+  const [page,        setPage]        = useState("dashboard");
+  const [products,    setProducts]    = useState([]);
+  const [stores,      setStores]      = useState([]);
+  const [orders,      setOrders]      = useState([]);
+  const [nextId,      setNextId]      = useState(1001);
 
-  const emP={name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:""};
-  const emS={name:"",addr:"",contact:"",phone:""};
-  const [pF,setPF]=useState(emP);
-  const [sF,setSF]=useState(emS);
-  const [eF,setEF]=useState({name:"",sku:"",qty:"",buy:"",sell:"",min:"",img:""}); // edit form
-  const [oSid,setOSid]=useState("");
-  const [oDate,setODate]=useState(new Date().toISOString().split("T")[0]);
-  const [oQtys,setOQtys]=useState({});
-  const [rQtys,setRQtys]=useState({});
+  // modals
+  const [mProd,    setMProd]    = useState(false);
+  const [mStore,   setMStore]   = useState(false);
+  const [mOrder,   setMOrder]   = useState(false);
+  const [mRestock, setMRestock] = useState(false);
+  const [mEdit,    setMEdit]    = useState(null);
+  const [mStoreEdit, setMStoreEdit] = useState(null);
 
+  // forms
+  const emP = { name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:"" };
+  const emS = { name:"",addr:"",contact:"",phone:"",bulstat:"" };
+  const [pF, setPF] = useState(emP);
+  const [sF, setSF] = useState(emS);
+  const [eF, setEF] = useState({ name:"",sku:"",qty:"",buy:"",sell:"",min:"",img:"" });
+  const [eSF, setESF] = useState({ name:"",addr:"",contact:"",phone:"",bulstat:"" });
+  const [oSid,  setOSid]  = useState("");
+  const [oDate, setODate] = useState(new Date().toISOString().split("T")[0]);
+  const [oQtys, setOQtys] = useState({});
+  const [rQtys, setRQtys] = useState({});
+
+  // ── LOAD ─────────────────────────────────────────────────
   function applyData(d) {
-    setProducts(d.products||[]);
-    setStores(d.stores||[]);
-    setStoreStock(d.storeStock||{});
-    setOrders(d.orders||[]);
-    setNextId(d.nextId||1001);
+    setProducts(d.products   || []);
+    setStores(d.stores       || []);
+    setOrders(d.orders       || []);
+    setNextId(d.nextId       || 1001);
   }
 
-  useEffect(()=>{
-    (async()=>{
-      const local=lsLoad();
-      if(local){ applyData(local); setReady(true); setSyncStatus("syncing"); }
+  useEffect(() => {
+    (async () => {
+      const local = lsLoad();
+      if (local) { applyData(local); setReady(true); setSyncStatus("syncing"); }
       try {
-        const remote=await binLoad();
-        if(remote&&remote.products!==undefined){
-          const lnid=local?.nextId||0; const rnid=remote?.nextId||0;
-          const winner=rnid>=lnid?remote:local;
+        const remote = await binLoad();
+        if (remote && remote.products !== undefined) {
+          const winner = (remote?.nextId||0) >= (local?.nextId||0) ? remote : local;
           applyData(winner); lsSave(winner);
         }
-        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
+        setSyncStatus("saved"); setTimeout(() => setSyncStatus(null), 2000);
       } catch(e) {
-        console.warn("JSONBin load failed",e);
-        setSyncStatus(local?"saved":"error"); setTimeout(()=>setSyncStatus(null),3000);
+        console.warn("load failed", e);
+        setSyncStatus(local ? "saved" : "error"); setTimeout(() => setSyncStatus(null), 3000);
       } finally { setReady(true); }
     })();
-  },[]);
+  }, []);
 
-  const binTimer=useRef(null);
-  const persist=useCallback((p,s,ss,o,nid)=>{
-    const data={products:p,stores:s,storeStock:ss,orders:o,nextId:nid};
+  // ── SAVE ─────────────────────────────────────────────────
+  const binTimer = useRef(null);
+  const persist = useCallback((p, s, o, nid) => {
+    const data = { products:p, stores:s, orders:o, nextId:nid };
     lsSave(data);
     clearTimeout(binTimer.current);
     setSyncStatus("saving");
-    binTimer.current=setTimeout(async()=>{
-      try{ await binSave(data); setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000); }
-      catch(e){ console.warn("JSONBin save failed",e); setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000); }
-    },1000);
-  },[]);
+    binTimer.current = setTimeout(async () => {
+      try { await binSave(data); setSyncStatus("saved"); setTimeout(() => setSyncStatus(null), 2000); }
+      catch(e) { console.warn("save failed", e); setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 4000); }
+    }, 1000);
+  }, []);
 
-  const oval=o=>o.items.reduce((s,i)=>{ const p=products.find(x=>x.id===i.pid); return s+(p?p.sellPrice*i.qty:0); },0);
-  const ototal=products.reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
-  const openOrder=sid=>{ const q={}; products.forEach(p=>q[p.id]=0); setOQtys(q); setOSid(sid||stores[0]?.id||""); setODate(new Date().toISOString().split("T")[0]); setMOrder(true); };
+  // ── HELPERS ───────────────────────────────────────────────
+  const oval   = o => o.items.reduce((s,i) => { const p = products.find(x=>x.id===i.pid); return s+(p?p.sellPrice*i.qty:0); }, 0);
+  const ototal = products.reduce((s,p) => s+(oQtys[p.id]||0)*p.sellPrice, 0);
 
-  // Open edit modal
-  const openEdit=(p)=>{
+  const openOrder = sid => {
+    const q={}; products.forEach(p=>q[p.id]=0);
+    setOQtys(q); setOSid(sid||stores[0]?.id||"");
+    setODate(new Date().toISOString().split("T")[0]);
+    setMOrder(true);
+  };
+
+  // ── CRUD ──────────────────────────────────────────────────
+  const addProd = () => {
+    if (!pF.name.trim()) return;
+    const nid = products.length ? Math.max(...products.map(p=>p.id))+1 : 1;
+    const np = { id:nid, name:pF.name, sku:pF.sku||`SKU-${nid}`, qty:parseInt(pF.qty)||0, buyPrice:parseFloat(pF.buy)||0, sellPrice:parseFloat(pF.sell)||0, minLevel:parseInt(pF.min)||10, image:pF.img };
+    const newP = [...products, np];
+    setProducts(newP); persist(newP, stores, orders, nextId);
+    setPF(emP); setMProd(false);
+  };
+
+  const openEdit = p => {
     setEF({ name:p.name, sku:p.sku, qty:String(p.qty), buy:String(p.buyPrice), sell:String(p.sellPrice), min:String(p.minLevel), img:p.image||"" });
     setMEdit(p.id);
   };
-  const saveEdit=()=>{
-    const newP=products.map(p=>p.id===mEdit?{ ...p, name:eF.name||p.name, sku:eF.sku||p.sku, qty:parseInt(eF.qty)||0, buyPrice:parseFloat(eF.buy)||0, sellPrice:parseFloat(eF.sell)||0, minLevel:parseInt(eF.min)||10, image:eF.img }:p);
-    setProducts(newP); persist(newP,stores,storeStock,orders,nextId);
+  const saveEdit = () => {
+    const newP = products.map(p => p.id===mEdit ? { ...p, name:eF.name||p.name, sku:eF.sku||p.sku, qty:parseInt(eF.qty)||0, buyPrice:parseFloat(eF.buy)||0, sellPrice:parseFloat(eF.sell)||0, minLevel:parseInt(eF.min)||10, image:eF.img } : p);
+    setProducts(newP); persist(newP, stores, orders, nextId);
     setMEdit(null);
   };
-
-  const addProd=()=>{
-    if(!pF.name.trim())return;
-    const nid=products.length?Math.max(...products.map(p=>p.id))+1:1;
-    const np={id:nid,name:pF.name,sku:pF.sku||`SKU-${nid}`,qty:parseInt(pF.qty)||0,buyPrice:parseFloat(pF.buy)||0,sellPrice:parseFloat(pF.sell)||0,minLevel:parseInt(pF.min)||10,image:pF.img};
-    const newP=[...products,np]; const newSS={...storeStock};
-    stores.forEach(s=>{ if(!newSS[s.id])newSS[s.id]={}; newSS[s.id][nid]=0; });
-    setProducts(newP); setStoreStock(newSS); persist(newP,stores,newSS,orders,nextId);
-    setPF(emP); setMProd(false);
+  const deleteProd = id => {
+    const newP = products.filter(x=>x.id!==id);
+    setProducts(newP); persist(newP, stores, orders, nextId);
   };
-  const addStore=()=>{
-    if(!sF.name.trim())return;
-    const nid=stores.length?Math.max(...stores.map(s=>s.id))+1:1;
-    const ns={id:nid,name:sF.name,address:sF.addr,contact:sF.contact,phone:sF.phone};
-    const newS=[...stores,ns]; const newSS={...storeStock,[nid]:{}};
-    products.forEach(p=>newSS[nid][p.id]=0);
-    setStores(newS); setStoreStock(newSS); persist(products,newS,newSS,orders,nextId);
+
+  const addStore = () => {
+    if (!sF.name.trim()) return;
+    const nid = stores.length ? Math.max(...stores.map(s=>s.id))+1 : 1;
+    const ns = { id:nid, name:sF.name, address:sF.addr, contact:sF.contact, phone:sF.phone, bulstat:sF.bulstat };
+    const newS = [...stores, ns];
+    setStores(newS); persist(products, newS, orders, nextId);
     setSF(emS); setMStore(false);
   };
-  const submitOrder=()=>{
-    const items=products.filter(p=>oQtys[p.id]>0).map(p=>({pid:p.id,qty:oQtys[p.id]}));
-    if(!items.length)return;
-    const sid=parseInt(oSid);
-    const no={id:nextId,storeId:sid,date:oDate,status:"pending",items};
-    const newO=[...orders,no]; const newP=products.map(p=>({...p,qty:Math.max(0,p.qty-(oQtys[p.id]||0))}));
-    const newSS={...storeStock}; if(!newSS[sid])newSS[sid]={};
-    items.forEach(i=>newSS[sid][i.pid]=(newSS[sid][i.pid]||0)+i.qty);
-    const newNid=nextId+1;
-    setOrders(newO); setProducts(newP); setStoreStock(newSS); setNextId(newNid);
-    persist(newP,stores,newSS,newO,newNid); setMOrder(false); setPage("orders");
+  const openStoreEdit = s => {
+    setESF({ name:s.name, addr:s.address, contact:s.contact, phone:s.phone, bulstat:s.bulstat||"" });
+    setMStoreEdit(s.id);
   };
-  const applyRestock=()=>{ const newP=products.map(p=>({...p,qty:p.qty+(rQtys[p.id]||0)})); setProducts(newP); persist(newP,stores,storeStock,orders,nextId); setMRestock(false); };
-  const deliverOrder=id=>{ const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,storeStock,newO,nextId); };
-  const deleteOrder=id=>{ const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,storeStock,newO,nextId); };
-  const deleteProd=id=>{ const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,storeStock,orders,nextId); };
-  const updateStock=(sid,pid,val)=>{ const newSS={...storeStock,[sid]:{...storeStock[sid],[pid]:val}}; setStoreStock(newSS); persist(products,stores,newSS,orders,nextId); };
+  const saveStoreEdit = () => {
+    const newS = stores.map(s => s.id===mStoreEdit ? { ...s, name:eSF.name||s.name, address:eSF.addr, contact:eSF.contact, phone:eSF.phone, bulstat:eSF.bulstat } : s);
+    setStores(newS); persist(products, newS, orders, nextId);
+    setMStoreEdit(null);
+  };
+  const deleteStore = id => {
+    const newS = stores.filter(x=>x.id!==id);
+    setStores(newS); persist(products, newS, orders, nextId);
+  };
 
-  if(!ready) return (
+  const submitOrder = () => {
+    const items = products.filter(p=>oQtys[p.id]>0).map(p=>({ pid:p.id, qty:oQtys[p.id] }));
+    if (!items.length) return;
+    const sid = parseInt(oSid);
+    const no  = { id:nextId, storeId:sid, date:oDate, status:"pending", items };
+    const newO   = [...orders, no];
+    const newP   = products.map(p=>({ ...p, qty:Math.max(0,p.qty-(oQtys[p.id]||0)) }));
+    const newNid = nextId+1;
+    setOrders(newO); setProducts(newP); setNextId(newNid);
+    persist(newP, stores, newO, newNid);
+    setMOrder(false); setPage("orders");
+  };
+
+  const applyRestock = () => {
+    const newP = products.map(p=>({ ...p, qty:p.qty+(rQtys[p.id]||0) }));
+    setProducts(newP); persist(newP, stores, orders, nextId);
+    setMRestock(false);
+  };
+  const deliverOrder = id => {
+    const newO = orders.map(x=>x.id===id?{...x,status:"done"}:x);
+    setOrders(newO); persist(products, stores, newO, nextId);
+  };
+  const deleteOrder = id => {
+    const newO = orders.filter(x=>x.id!==id);
+    setOrders(newO); persist(products, stores, newO, nextId);
+  };
+
+  // ── LOADING ───────────────────────────────────────────────
+  if (!ready) return (
     <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f0f14",color:"#e8e8f0",gap:20 }}>
       <style>{`@keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}`}</style>
       <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.8rem" }}><span style={{ color:"#f0c040" }}>Хабитат</span><span>-64</span></div>
@@ -204,19 +244,25 @@ export default function App() {
     </div>
   );
 
-  const card={background:"#16161e",border:"1px solid #2a2a38",borderRadius:14};
-  const detStore=stores.find(s=>s.id===mSD);
-  const editProd=products.find(p=>p.id===mEdit);
+  const card = { background:"#16161e",border:"1px solid #2a2a38",borderRadius:14 };
+  const editProd  = products.find(p=>p.id===mEdit);
+  const editStore = stores.find(s=>s.id===mStoreEdit);
 
-  const Dashboard=()=>{
-    const tqty=products.reduce((s,p)=>s+p.qty,0);
-    const tval=products.reduce((s,p)=>s+p.qty*p.buyPrice,0);
-    const alrt=products.filter(p=>p.qty<=p.minLevel);
-    const pend=orders.filter(o=>o.status==="pending");
+  // ── DASHBOARD ─────────────────────────────────────────────
+  const Dashboard = () => {
+    const tqty = products.reduce((s,p)=>s+p.qty,0);
+    const tval = products.reduce((s,p)=>s+p.qty*p.buyPrice,0);
+    const alrt = products.filter(p=>p.qty<=p.minLevel);
+    const pend = orders.filter(o=>o.status==="pending");
     return (
       <div style={{ display:"flex",flexDirection:"column",gap:20 }}>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-          {[{clr:"#f0c040",icon:"📦",lbl:"В склад",val:tqty,sub:`${products.length} артикула`},{clr:"#4ecdc4",icon:"💰",lbl:"Стойност",val:`${tval.toFixed(0)} лв`,sub:"по покупна цена"},{clr:"#f87171",icon:"⚠️",lbl:"Ниски",val:alrt.length,sub:`${products.filter(p=>p.qty===0).length} изчерпани`},{clr:"#4ade80",icon:"📋",lbl:"Чакащи заявки",val:pend.length,sub:`${stores.length} обекта`}].map(s=>(
+          {[
+            { clr:"#f0c040",icon:"📦",lbl:"В склад",      val:tqty,                  sub:`${products.length} артикула` },
+            { clr:"#4ecdc4",icon:"💰",lbl:"Стойност",     val:fmt(tval),             sub:"по покупна цена" },
+            { clr:"#f87171",icon:"⚠️",lbl:"Ниски",        val:alrt.length,           sub:`${products.filter(p=>p.qty===0).length} изчерпани` },
+            { clr:"#4ade80",icon:"📋",lbl:"Чакащи заявки",val:pend.length,           sub:`${stores.length} обекта` },
+          ].map(s=>(
             <div key={s.lbl} style={{ ...card,padding:14,position:"relative",overflow:"hidden" }}>
               <div style={{ position:"absolute",top:0,left:0,right:0,height:3,background:s.clr }} />
               <div style={{ fontSize:"1.3rem",marginBottom:4 }}>{s.icon}</div>
@@ -226,60 +272,90 @@ export default function App() {
             </div>
           ))}
         </div>
+
         <div>
           <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",marginBottom:10 }}>📋 Трябва да се занесе</div>
-          {pend.length===0?<div style={{ ...card,padding:28,textAlign:"center",color:"#8888a0",fontSize:"0.86rem" }}>✅ Няма чакащи заявки</div>:pend.map(o=>{
-            const store=stores.find(s=>s.id===o.storeId);
-            return (
-              <div key={o.id} style={{ ...card,padding:"13px 14px",marginBottom:10 }}>
-                <div style={{ display:"flex",alignItems:"center",gap:8,background:"rgba(240,192,64,0.10)",border:"1px solid rgba(240,192,64,0.28)",borderRadius:10,padding:"8px 12px",marginBottom:12 }}>
-                  <span style={{ fontSize:"1.2rem" }}>🏪</span>
-                  <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.88rem",color:"#f0c040",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{store?.name}</div>
-                    <div style={{ fontSize:"0.67rem",color:"#8888a0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>📍 {store?.address}</div>
-                  </div>
-                  <span style={{ fontSize:"0.68rem",color:"#8888a0" }}>#{o.id}</span>
-                </div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                  {o.items.map(item=>{ const p=products.find(x=>x.id===item.pid); if(!p)return null; return (
-                    <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
-                      <Thumb p={p} size={44} />
-                      <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:"0.82rem",fontWeight:600,lineHeight:1.25,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div></div>
-                      <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.25rem",color:"#f0c040" }}>×{item.qty}</div>
+          {pend.length===0
+            ? <div style={{ ...card,padding:28,textAlign:"center",color:"#8888a0",fontSize:"0.86rem" }}>✅ Няма чакащи заявки</div>
+            : pend.map(o => {
+                const store = stores.find(s=>s.id===o.storeId);
+                return (
+                  <div key={o.id} style={{ ...card,padding:"13px 14px",marginBottom:10 }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:8,background:"rgba(240,192,64,0.10)",border:"1px solid rgba(240,192,64,0.28)",borderRadius:10,padding:"8px 12px",marginBottom:12 }}>
+                      <span style={{ fontSize:"1.2rem" }}>🏪</span>
+                      <div style={{ flex:1,minWidth:0 }}>
+                        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.88rem",color:"#f0c040",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{store?.name}</div>
+                        <div style={{ fontSize:"0.67rem",color:"#8888a0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>📍 {store?.address}</div>
+                      </div>
+                      <span style={{ fontSize:"0.68rem",color:"#8888a0" }}>#{o.id}</span>
                     </div>
-                  ); })}
-                </div>
-              </div>
-            );
-          })}
+                    <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                      {o.items.map(item => {
+                        const p = products.find(x=>x.id===item.pid); if(!p)return null;
+                        return (
+                          <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
+                            <Thumb p={p} size={44} />
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <div style={{ fontSize:"0.82rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
+                            </div>
+                            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.25rem",color:"#f0c040" }}>×{item.qty}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+          }
         </div>
-        {alrt.length>0&&<div><div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",marginBottom:10 }}>⚠️ Ниски наличности</div>{alrt.map(p=>(
-          <div key={p.id} style={{ ...card,display:"flex",alignItems:"center",gap:12,padding:"11px 13px",marginBottom:8 }}>
-            <Thumb p={p} size={44} />
-            <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:"0.84rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div><Badge t={p.qty===0?"out":"low"}>{p.qty===0?"ИЗЧЕРПАН":"НИСЪК"}</Badge></div>
-            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.3rem",color:p.qty===0?"#f87171":"#fb923c" }}>{p.qty}</div>
+
+        {alrt.length>0 && (
+          <div>
+            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",marginBottom:10 }}>⚠️ Ниски наличности</div>
+            {alrt.map(p=>(
+              <div key={p.id} style={{ ...card,display:"flex",alignItems:"center",gap:12,padding:"11px 13px",marginBottom:8 }}>
+                <Thumb p={p} size={44} />
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:"0.84rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
+                  <Badge t={p.qty===0?"out":"low"}>{p.qty===0?"ИЗЧЕРПАН":"НИСЪК"}</Badge>
+                </div>
+                <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.3rem",color:p.qty===0?"#f87171":"#fb923c" }}>{p.qty}</div>
+              </div>
+            ))}
           </div>
-        ))}</div>}
+        )}
       </div>
     );
   };
 
-  const Inventory=()=>(
+  // ── INVENTORY ─────────────────────────────────────────────
+  const Inventory = () => (
     <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
       <div style={{ display:"flex",gap:8 }}>
         <Btn v="sec" sm style={{ flex:1 }} onClick={()=>{ const q={}; products.forEach(p=>q[p.id]=0); setRQtys(q); setMRestock(true); }}>📥 Зареди</Btn>
         <Btn sm style={{ flex:1 }} onClick={()=>setMProd(true)}>＋ Нов продукт</Btn>
       </div>
-      {products.length===0&&<div style={{ ...card,padding:40,textAlign:"center",color:"#8888a0" }}>Няма продукти. Натисни „+ Нов продукт".</div>}
-      {products.map(p=>{
-        const st=p.qty===0?"out":p.qty<=p.minLevel?"low":"ok";
-        const bc=st==="ok"?"#4ade80":st==="low"?"#fb923c":"#f87171";
-        const pct=p.minLevel>0?Math.min(100,Math.round(p.qty/(p.minLevel*3)*100)):100;
+      {products.length===0 && <div style={{ ...card,padding:40,textAlign:"center",color:"#8888a0" }}>Няма продукти.</div>}
+      {products.map(p => {
+        const st  = p.qty===0?"out":p.qty<=p.minLevel?"low":"ok";
+        const bc  = st==="ok"?"#4ade80":st==="low"?"#fb923c":"#f87171";
+        const pct = p.minLevel>0?Math.min(100,Math.round(p.qty/(p.minLevel*3)*100)):100;
         return (
           <div key={p.id} style={{ ...card,overflow:"hidden" }}>
-            <div style={{ height:140,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden" }}>
-              <div style={{ fontSize:"4.5rem" }}>{EMOJIS[(p.id-1)%EMOJIS.length]||"📦"}</div>
-              <div style={{ position:"absolute",top:10,right:10 }}><Badge t={st}>{st==="ok"?"ОК":st==="low"?"Нисък":"Изчерпан"}</Badge></div>
+            {/* IMAGE — показва URL снимка ИЛИ emoji */}
+            <div style={{ height:150,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden" }}>
+              {p.image
+                ? <img src={p.image} alt={p.name}
+                    onError={e=>{ e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }}
+                    style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+                : null
+              }
+              <div style={{ fontSize:"4.5rem",display:p.image?"none":"flex",alignItems:"center",justifyContent:"center",width:"100%",height:"100%",position:p.image?"absolute":"relative" }}>
+                {EMOJIS[(p.id-1)%EMOJIS.length]||"📦"}
+              </div>
+              <div style={{ position:"absolute",top:10,right:10 }}>
+                <Badge t={st}>{st==="ok"?"ОК":st==="low"?"Нисък":"Изчерпан"}</Badge>
+              </div>
             </div>
             <div style={{ padding:"13px 14px" }}>
               <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.95rem",lineHeight:1.3,marginBottom:10 }}>{p.name}</div>
@@ -291,15 +367,16 @@ export default function App() {
                 </div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase" }}>Продажна цена</div>
-                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1.15rem",color:"#f0c040" }}>{p.sellPrice.toFixed(2)} лв.</div>
-                  <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>купуване {p.buyPrice.toFixed(2)} лв.</div>
+                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1.15rem",color:"#f0c040" }}>{fmt(p.sellPrice)}</div>
+                  <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>купуване {fmt(p.buyPrice)}</div>
                 </div>
               </div>
-              <div style={{ height:5,background:"#1e1e2a",borderRadius:3,overflow:"hidden",marginBottom:10 }}><div style={{ height:5,width:`${pct}%`,background:bc,borderRadius:3 }} /></div>
-              {/* БУТОНИ */}
+              <div style={{ height:5,background:"#1e1e2a",borderRadius:3,overflow:"hidden",marginBottom:10 }}>
+                <div style={{ height:5,width:`${pct}%`,background:bc,borderRadius:3 }} />
+              </div>
               <div style={{ display:"flex",gap:8 }}>
                 <Btn v="edit" sm style={{ flex:1 }} onClick={()=>openEdit(p)}>✏️ Редактирай</Btn>
-                <Btn v="del" sm style={{ flex:1 }} onClick={()=>deleteProd(p.id)}>✕ Изтрий</Btn>
+                <Btn v="del"  sm style={{ flex:1 }} onClick={()=>deleteProd(p.id)}>✕ Изтрий</Btn>
               </div>
             </div>
           </div>
@@ -308,12 +385,13 @@ export default function App() {
     </div>
   );
 
-  const Orders=()=>(
+  // ── ORDERS ────────────────────────────────────────────────
+  const Orders = () => (
     <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
       <Btn full onClick={()=>openOrder()}>＋ Нова заявка</Btn>
-      {orders.length===0&&<div style={{ ...card,padding:50,textAlign:"center",color:"#8888a0" }}>📋 Няма заявки</div>}
-      {[...orders].sort((a,b)=>b.id-a.id).map(o=>{
-        const store=stores.find(s=>s.id===o.storeId);
+      {orders.length===0 && <div style={{ ...card,padding:50,textAlign:"center",color:"#8888a0" }}>📋 Няма заявки</div>}
+      {[...orders].sort((a,b)=>b.id-a.id).map(o => {
+        const store = stores.find(s=>s.id===o.storeId);
         return (
           <div key={o.id} style={{ ...card,padding:"14px 14px" }}>
             <div style={{ display:"flex",alignItems:"center",gap:8,background:o.status==="pending"?"rgba(240,192,64,0.10)":"rgba(78,205,196,0.08)",border:`1px solid ${o.status==="pending"?"rgba(240,192,64,0.3)":"rgba(78,205,196,0.22)"}`,borderRadius:10,padding:"9px 12px",marginBottom:12 }}>
@@ -328,17 +406,26 @@ export default function App() {
               </div>
             </div>
             <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:12 }}>
-              {o.items.map(item=>{ const p=products.find(x=>x.id===item.pid); if(!p)return null; return (
-                <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
-                  <Thumb p={p} size={48} />
-                  <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:"0.84rem",fontWeight:600,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div><div style={{ fontSize:"0.67rem",color:"#8888a0" }}>{(p.sellPrice*item.qty).toFixed(2)} лв.</div></div>
-                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.35rem",color:"#f0c040" }}>×{item.qty}</div>
-                </div>
-              ); })}
+              {o.items.map(item => {
+                const p = products.find(x=>x.id===item.pid); if(!p)return null;
+                return (
+                  <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
+                    <Thumb p={p} size={48} />
+                    <div style={{ flex:1,minWidth:0 }}>
+                      <div style={{ fontSize:"0.84rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
+                      <div style={{ fontSize:"0.67rem",color:"#8888a0" }}>{fmt(p.sellPrice*item.qty)}</div>
+                    </div>
+                    <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.35rem",color:"#f0c040" }}>×{item.qty}</div>
+                  </div>
+                );
+              })}
             </div>
             <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-              <span style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040" }}>{oval(o).toFixed(2)} лв.</span>
-              <div style={{ display:"flex",gap:7 }}>{o.status==="pending"&&<Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}<Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn></div>
+              <span style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040" }}>{fmt(oval(o))}</span>
+              <div style={{ display:"flex",gap:7 }}>
+                {o.status==="pending" && <Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}
+                <Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn>
+              </div>
             </div>
           </div>
         );
@@ -346,29 +433,62 @@ export default function App() {
     </div>
   );
 
-  const Stores=()=>(
+  // ── STORES — само списък, без наличности ──────────────────
+  const Stores = () => (
     <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
       <Btn full onClick={()=>setMStore(true)}>＋ Нов обект</Btn>
-      {stores.length===0&&<div style={{ ...card,padding:40,textAlign:"center",color:"#8888a0" }}>Няма обекти.</div>}
-      {stores.map(s=>{
-        const stk=storeStock[s.id]||{};
-        const pendCnt=orders.filter(o=>o.storeId===s.id&&o.status==="pending").length;
+      {stores.length===0 && <div style={{ ...card,padding:40,textAlign:"center",color:"#8888a0" }}>Няма добавени обекти.</div>}
+      {stores.map(s => {
+        const pendCnt = orders.filter(o=>o.storeId===s.id&&o.status==="pending").length;
+        const totalOrders = orders.filter(o=>o.storeId===s.id).length;
         return (
-          <div key={s.id} style={{ ...card,padding:"14px 14px" }}>
-            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.98rem",marginBottom:3 }}>{s.name}</div>
-            <div style={{ fontSize:"0.76rem",color:"#8888a0",marginBottom:10 }}>📍 {s.address}</div>
-            {pendCnt>0&&<div style={{ marginBottom:10 }}><Badge t="pending">{pendCnt} чакащи заявки</Badge></div>}
-            <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:9 }}>Наличност при обекта</div>
-            {products.map(p=>{ const q=stk[p.id]||0; const c=q===0?"#f87171":q<10?"#fb923c":"#4ade80"; return (
-              <div key={p.id} style={{ display:"flex",alignItems:"center",gap:9,marginBottom:8 }}>
-                <Thumb p={p} size={32} />
-                <div style={{ flex:1,fontSize:"0.78rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
-                <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,color:c,fontSize:"0.90rem",minWidth:28,textAlign:"right" }}>{q}</div>
+          <div key={s.id} style={{ ...card,padding:"16px 16px" }}>
+            {/* Хедър */}
+            <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:14 }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.05rem",marginBottom:4 }}>{s.name}</div>
+                {pendCnt>0 && <Badge t="pending">{pendCnt} чакащи заявки</Badge>}
               </div>
-            ); })}
-            <div style={{ display:"flex",gap:8,marginTop:12 }}>
-              <Btn v="sec" sm style={{ flex:1 }} onClick={()=>setMSD(s.id)}>📋 Детайли</Btn>
-              <Btn sm style={{ flex:1 }} onClick={()=>openOrder(s.id)}>＋ Заявка</Btn>
+              <div style={{ display:"flex",gap:6,flexShrink:0,marginLeft:10 }}>
+                <Btn v="edit" sm onClick={()=>openStoreEdit(s)}>✏️</Btn>
+                <Btn v="del"  sm onClick={()=>deleteStore(s.id)}>✕</Btn>
+              </div>
+            </div>
+            {/* Инфо редове */}
+            <div style={{ display:"flex",flexDirection:"column",gap:7 }}>
+              {s.address && (
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <span style={{ fontSize:"1rem",flexShrink:0 }}>📍</span>
+                  <span style={{ fontSize:"0.84rem",color:"#e8e8f0" }}>{s.address}</span>
+                </div>
+              )}
+              {s.contact && (
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <span style={{ fontSize:"1rem",flexShrink:0 }}>👤</span>
+                  <span style={{ fontSize:"0.84rem",color:"#e8e8f0" }}>{s.contact}</span>
+                </div>
+              )}
+              {s.phone && (
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <span style={{ fontSize:"1rem",flexShrink:0 }}>📞</span>
+                  <span style={{ fontSize:"0.84rem",color:"#e8e8f0" }}>{s.phone}</span>
+                </div>
+              )}
+              {s.bulstat && (
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <span style={{ fontSize:"1rem",flexShrink:0 }}>🏢</span>
+                  <span style={{ fontSize:"0.84rem",color:"#8888a0" }}>Булстат: </span>
+                  <span style={{ fontSize:"0.84rem",color:"#e8e8f0",fontFamily:"Syne,sans-serif",fontWeight:600 }}>{s.bulstat}</span>
+                </div>
+              )}
+              <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:2 }}>
+                <span style={{ fontSize:"1rem",flexShrink:0 }}>📋</span>
+                <span style={{ fontSize:"0.80rem",color:"#8888a0" }}>{totalOrders} общо заявки</span>
+              </div>
+            </div>
+            {/* Бутон заявка */}
+            <div style={{ marginTop:14 }}>
+              <Btn full onClick={()=>openOrder(s.id)}>＋ Нова заявка</Btn>
             </div>
           </div>
         );
@@ -376,33 +496,45 @@ export default function App() {
     </div>
   );
 
-  const navItems=[{id:"dashboard",icon:"📊",lbl:"Табло"},{id:"inventory",icon:"📦",lbl:"Склад"},{id:"orders",icon:"📋",lbl:"Заявки"},{id:"stores",icon:"🏪",lbl:"Обекти"}];
+  const navItems = [
+    { id:"dashboard", icon:"📊", lbl:"Табло"  },
+    { id:"inventory", icon:"📦", lbl:"Склад"  },
+    { id:"orders",    icon:"📋", lbl:"Заявки" },
+    { id:"stores",    icon:"🏪", lbl:"Обекти" },
+  ];
 
-  // Numeric input style — извиква цифрова клавиатура на мобилен
-  const numIS = { ...IS, fontSize:"1.1rem", textAlign:"center", padding:"14px" };
+  const numIS = { ...IS,fontSize:"1.1rem",textAlign:"center",padding:"14px" };
 
   return (
     <div style={{ display:"flex",flexDirection:"column",minHeight:"100vh",background:"#0f0f14",color:"#e8e8f0",fontFamily:"'DM Sans',sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{-webkit-tap-highlight-color:transparent;}input,select{-webkit-appearance:none;}@keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{-webkit-tap-highlight-color:transparent;}
+        input,select{-webkit-appearance:none;}
+        @keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}
+      `}</style>
 
       <header style={{ background:"#16161e",borderBottom:"1px solid #2a2a38",padding:"0 16px",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexShrink:0 }}>
-        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.15rem" }}><span style={{ color:"#f0c040" }}>Хабитат</span><span style={{ color:"#e8e8f0" }}>-64</span></div>
+        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.15rem" }}>
+          <span style={{ color:"#f0c040" }}>Хабитат</span><span style={{ color:"#e8e8f0" }}>-64</span>
+        </div>
         <div style={{ fontSize:"0.78rem",color:"#8888a0" }}>{navItems.find(n=>n.id===page)?.lbl}</div>
         <div>
-          {page==="inventory"&&<Btn sm onClick={()=>setMProd(true)}>＋</Btn>}
-          {page==="orders"&&<Btn sm onClick={()=>openOrder()}>＋</Btn>}
-          {page==="stores"&&<Btn sm onClick={()=>setMStore(true)}>＋</Btn>}
-          {page==="dashboard"&&<div style={{ width:42 }} />}
+          {page==="inventory" && <Btn sm onClick={()=>setMProd(true)}>＋</Btn>}
+          {page==="orders"    && <Btn sm onClick={()=>openOrder()}>＋</Btn>}
+          {page==="stores"    && <Btn sm onClick={()=>setMStore(true)}>＋</Btn>}
+          {page==="dashboard" && <div style={{ width:42 }} />}
         </div>
       </header>
 
       <StatusBar status={syncStatus} />
 
       <main style={{ flex:1,padding:"16px 14px 90px",overflowY:"auto" }}>
-        {page==="dashboard"&&<Dashboard/>}
-        {page==="inventory"&&<Inventory/>}
-        {page==="orders"&&<Orders/>}
-        {page==="stores"&&<Stores/>}
+        {page==="dashboard" && <Dashboard />}
+        {page==="inventory" && <Inventory />}
+        {page==="orders"    && <Orders />}
+        {page==="stores"    && <Stores />}
       </main>
 
       <nav style={{ position:"fixed",bottom:0,left:0,right:0,background:"#16161e",borderTop:"1px solid #2a2a38",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)" }}>
@@ -410,64 +542,60 @@ export default function App() {
           <button key={n.id} onClick={()=>setPage(n.id)} style={{ flex:1,background:"none",border:"none",color:page===n.id?"#f0c040":"#8888a0",cursor:"pointer",padding:"10px 4px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontFamily:"'DM Sans',sans-serif",transition:"color 0.15s" }}>
             <span style={{ fontSize:"1.35rem",lineHeight:1 }}>{n.icon}</span>
             <span style={{ fontSize:"0.62rem",fontWeight:page===n.id?700:400 }}>{n.lbl}</span>
-            {page===n.id&&<div style={{ width:18,height:2,background:"#f0c040",borderRadius:1 }} />}
+            {page===n.id && <div style={{ width:18,height:2,background:"#f0c040",borderRadius:1 }} />}
           </button>
         ))}
       </nav>
 
-      {/* ── РЕДАКТИРАЙ ПРОДУКТ ── */}
-      <Modal open={!!mEdit} onClose={()=>setMEdit(null)} title={`✏️ Редактирай — ${editProd?.name||""}`}
-        footer={[<Btn key="s" full onClick={saveEdit}>✓ Запази промените</Btn>,<Btn key="c" v="sec" full onClick={()=>setMEdit(null)}>Отказ</Btn>]}>
-        <FG label="Снимка (по желание)"><ImgUpload val={eF.img} onChange={v=>setEF(f=>({...f,img:v}))} /></FG>
-        <FG label="Наименование">
-          <input style={IS} value={eF.name} onChange={e=>setEF(f=>({...f,name:e.target.value}))} />
+      {/* ═══ РЕДАКТИРАЙ ПРОДУКТ ═══ */}
+      <Modal open={!!mEdit} onClose={()=>setMEdit(null)} title={`✏️ ${editProd?.name||"Редактирай"}`}
+        footer={[<Btn key="s" full onClick={saveEdit}>✓ Запази</Btn>,<Btn key="c" v="sec" full onClick={()=>setMEdit(null)}>Отказ</Btn>]}>
+        <FG label="URL на снимка">
+          <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:8 }}>
+            <div style={{ width:64,height:64,borderRadius:12,background:"#1a1a24",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.8rem",flexShrink:0,border:"1px solid #2a2a38" }}>
+              {eF.img ? <img src={eF.img} style={{ width:"100%",height:"100%",objectFit:"cover" }} onError={e=>e.target.style.display="none"} /> : EMOJIS[(mEdit-1)%EMOJIS.length]||"📦"}
+            </div>
+            <input style={{ ...IS,flex:1 }} placeholder="https://example.com/product.jpg" value={eF.img} onChange={e=>setEF(f=>({...f,img:e.target.value}))} />
+          </div>
         </FG>
-        <FG label="SKU / Код">
-          <input style={IS} value={eF.sku} onChange={e=>setEF(f=>({...f,sku:e.target.value}))} />
-        </FG>
-        {/* БРОЙКА — голямо поле с цифрова клавиатура */}
+        <FG label="Наименование"><input style={IS} value={eF.name} onChange={e=>setEF(f=>({...f,name:e.target.value}))} /></FG>
+        <FG label="SKU / Код"><input style={IS} value={eF.sku} onChange={e=>setEF(f=>({...f,sku:e.target.value}))} /></FG>
         <FG label="Налично количество (бр.)">
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <button onClick={()=>setEF(f=>({...f,qty:String(Math.max(0,(parseInt(f.qty)||0)-1))}))} style={{ width:48,height:48,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.4rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>−</button>
-            <input
-              style={{ ...numIS, flex:1 }}
-              type="number"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={eF.qty}
-              onChange={e=>setEF(f=>({...f,qty:e.target.value}))}
-            />
+            <input style={{ ...numIS,flex:1 }} type="number" inputMode="numeric" pattern="[0-9]*" value={eF.qty} onChange={e=>setEF(f=>({...f,qty:e.target.value}))} />
             <button onClick={()=>setEF(f=>({...f,qty:String((parseInt(f.qty)||0)+1)}))} style={{ width:48,height:48,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.4rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>+</button>
           </div>
         </FG>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-          <FG label="Цена купуване">
-            <input style={IS} type="number" step="0.01" inputMode="decimal" value={eF.buy} onChange={e=>setEF(f=>({...f,buy:e.target.value}))} />
-          </FG>
-          <FG label="Цена продажба">
-            <input style={IS} type="number" step="0.01" inputMode="decimal" value={eF.sell} onChange={e=>setEF(f=>({...f,sell:e.target.value}))} />
-          </FG>
+          <FG label="Цена купуване (€)"><input style={IS} type="number" step="0.01" inputMode="decimal" value={eF.buy} onChange={e=>setEF(f=>({...f,buy:e.target.value}))} /></FG>
+          <FG label="Цена продажба (€)"><input style={IS} type="number" step="0.01" inputMode="decimal" value={eF.sell} onChange={e=>setEF(f=>({...f,sell:e.target.value}))} /></FG>
         </div>
-        <FG label="Мин. ниво (предупреждение)">
-          <input style={IS} type="number" inputMode="numeric" value={eF.min} onChange={e=>setEF(f=>({...f,min:e.target.value}))} />
-        </FG>
+        <FG label="Мин. ниво (предупреждение)"><input style={IS} type="number" inputMode="numeric" value={eF.min} onChange={e=>setEF(f=>({...f,min:e.target.value}))} /></FG>
       </Modal>
 
-      {/* ── НОВ ПРОДУКТ ── */}
+      {/* ═══ НОВ ПРОДУКТ ═══ */}
       <Modal open={mProd} onClose={()=>setMProd(false)} title="📦 Нов продукт"
         footer={[<Btn key="s" full onClick={addProd}>✓ Добави и запази</Btn>,<Btn key="c" v="sec" full onClick={()=>setMProd(false)}>Отказ</Btn>]}>
-        <FG label="Снимка (по желание)"><ImgUpload val={pF.img} onChange={v=>setPF(f=>({...f,img:v}))} /></FG>
+        <FG label="URL на снимка (по желание)">
+          <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:8 }}>
+            <div style={{ width:56,height:56,borderRadius:12,background:"#1a1a24",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.6rem",flexShrink:0,border:"1px solid #2a2a38" }}>
+              {pF.img ? <img src={pF.img} style={{ width:"100%",height:"100%",objectFit:"cover" }} onError={e=>e.target.style.display="none"} /> : "📷"}
+            </div>
+            <input style={{ ...IS,flex:1 }} placeholder="https://example.com/product.jpg" value={pF.img} onChange={e=>setPF(f=>({...f,img:e.target.value}))} />
+          </div>
+        </FG>
         <FG label="Наименование"><input style={IS} placeholder="напр. Бонбони Амос" value={pF.name} onChange={e=>setPF(f=>({...f,name:e.target.value}))} /></FG>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           <FG label="SKU"><input style={IS} placeholder="AMO-WC" value={pF.sku} onChange={e=>setPF(f=>({...f,sku:e.target.value}))} /></FG>
           <FG label="Количество"><input style={IS} type="number" inputMode="numeric" pattern="[0-9]*" placeholder="0" value={pF.qty} onChange={e=>setPF(f=>({...f,qty:e.target.value}))} /></FG>
-          <FG label="Цена купуване"><input style={IS} type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={pF.buy} onChange={e=>setPF(f=>({...f,buy:e.target.value}))} /></FG>
-          <FG label="Цена продажба"><input style={IS} type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={pF.sell} onChange={e=>setPF(f=>({...f,sell:e.target.value}))} /></FG>
+          <FG label="Цена купуване (€)"><input style={IS} type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={pF.buy} onChange={e=>setPF(f=>({...f,buy:e.target.value}))} /></FG>
+          <FG label="Цена продажба (€)"><input style={IS} type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={pF.sell} onChange={e=>setPF(f=>({...f,sell:e.target.value}))} /></FG>
         </div>
         <FG label="Мин. ниво"><input style={IS} type="number" inputMode="numeric" value={pF.min} onChange={e=>setPF(f=>({...f,min:e.target.value}))} /></FG>
       </Modal>
 
-      {/* ── ЗАРЕДИ ── */}
+      {/* ═══ ЗАРЕДИ ═══ */}
       <Modal open={mRestock} onClose={()=>setMRestock(false)} title="📥 Зареди от производител"
         footer={[<Btn key="a" full onClick={applyRestock}>✓ Потвърди</Btn>,<Btn key="c" v="sec" full onClick={()=>setMRestock(false)}>Отказ</Btn>]}>
         {products.map(p=>(
@@ -487,77 +615,66 @@ export default function App() {
         ))}
       </Modal>
 
-      {/* ── НОВ ОБЕКТ ── */}
+      {/* ═══ НОВ ОБЕКТ ═══ */}
       <Modal open={mStore} onClose={()=>setMStore(false)} title="🏪 Нов обект"
         footer={[<Btn key="s" full onClick={addStore}>✓ Добави и запази</Btn>,<Btn key="c" v="sec" full onClick={()=>setMStore(false)}>Отказ</Btn>]}>
         <FG label="Наименование"><input style={IS} placeholder='Магазин "Нов"' value={sF.name} onChange={e=>setSF(f=>({...f,name:e.target.value}))} /></FG>
         <FG label="Адрес"><input style={IS} placeholder="ул. ..." value={sF.addr} onChange={e=>setSF(f=>({...f,addr:e.target.value}))} /></FG>
         <FG label="Контактно лице"><input style={IS} placeholder="Иван Иванов" value={sF.contact} onChange={e=>setSF(f=>({...f,contact:e.target.value}))} /></FG>
         <FG label="Телефон"><input style={IS} placeholder="088..." value={sF.phone} onChange={e=>setSF(f=>({...f,phone:e.target.value}))} /></FG>
+        <FG label="Булстат"><input style={IS} placeholder="123456789" value={sF.bulstat} onChange={e=>setSF(f=>({...f,bulstat:e.target.value}))} /></FG>
       </Modal>
 
-      {/* ── НОВА ЗАЯВКА ── */}
+      {/* ═══ РЕДАКТИРАЙ ОБЕКТ ═══ */}
+      <Modal open={!!mStoreEdit} onClose={()=>setMStoreEdit(null)} title={`✏️ ${editStore?.name||"Редактирай обект"}`}
+        footer={[<Btn key="s" full onClick={saveStoreEdit}>✓ Запази</Btn>,<Btn key="c" v="sec" full onClick={()=>setMStoreEdit(null)}>Отказ</Btn>]}>
+        <FG label="Наименование"><input style={IS} value={eSF.name} onChange={e=>setESF(f=>({...f,name:e.target.value}))} /></FG>
+        <FG label="Адрес"><input style={IS} value={eSF.addr} onChange={e=>setESF(f=>({...f,addr:e.target.value}))} /></FG>
+        <FG label="Контактно лице"><input style={IS} value={eSF.contact} onChange={e=>setESF(f=>({...f,contact:e.target.value}))} /></FG>
+        <FG label="Телефон"><input style={IS} value={eSF.phone} onChange={e=>setESF(f=>({...f,phone:e.target.value}))} /></FG>
+        <FG label="Булстат"><input style={IS} value={eSF.bulstat} onChange={e=>setESF(f=>({...f,bulstat:e.target.value}))} /></FG>
+      </Modal>
+
+      {/* ═══ НОВА ЗАЯВКА ═══ */}
       <Modal open={mOrder} onClose={()=>setMOrder(false)} title="📋 Нова заявка"
-        footer={[<Btn key="s" full onClick={submitOrder}>✓ Изпрати — {ototal.toFixed(2)} лв.</Btn>,<Btn key="c" v="sec" full onClick={()=>setMOrder(false)}>Отказ</Btn>]}>
-        <FG label="Обект"><select value={oSid} onChange={e=>setOSid(e.target.value)} style={IS}>{stores.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></FG>
+        footer={[<Btn key="s" full onClick={submitOrder}>✓ Изпрати — {fmt(ototal)}</Btn>,<Btn key="c" v="sec" full onClick={()=>setMOrder(false)}>Отказ</Btn>]}>
+        <FG label="Обект">
+          <select value={oSid} onChange={e=>setOSid(e.target.value)} style={IS}>
+            {stores.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </FG>
         <FG label="Дата"><input style={IS} type="date" value={oDate} onChange={e=>setODate(e.target.value)} /></FG>
-        {oSid&&(()=>{ const s=stores.find(x=>x.id==oSid); return s?(<div style={{ background:"rgba(240,192,64,0.08)",border:"1px solid rgba(240,192,64,0.24)",borderRadius:10,padding:"9px 12px",marginBottom:14 }}><div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.86rem" }}>{s.name}</div><div style={{ fontSize:"0.68rem",color:"#8888a0" }}>📍 {s.address} · 👤 {s.contact}</div></div>):null; })()}
+        {oSid && (() => { const s=stores.find(x=>x.id==oSid); return s?(
+          <div style={{ background:"rgba(240,192,64,0.08)",border:"1px solid rgba(240,192,64,0.24)",borderRadius:10,padding:"9px 12px",marginBottom:14 }}>
+            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.86rem" }}>{s.name}</div>
+            <div style={{ fontSize:"0.68rem",color:"#8888a0" }}>📍 {s.address} · 👤 {s.contact}</div>
+          </div>
+        ):null; })()}
         <div style={{ fontSize:"0.68rem",color:"#8888a0",textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:10 }}>Избери продукти</div>
         <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
           {products.map(p=>(
             <div key={p.id} style={{ background:"#1a1a24",borderRadius:11,padding:"10px 12px",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.45)":"transparent"}` }}>
-              {/* Ред 1: снимка + наименование */}
               <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
                 <Thumb p={p} size={42} />
                 <div style={{ flex:1,minWidth:0 }}>
                   <div style={{ fontWeight:600,fontSize:"0.84rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
-                  <div style={{ fontSize:"0.67rem",color:"#8888a0" }}>Склад: {p.qty} бр. · {p.sellPrice.toFixed(2)} лв./бр.</div>
-                  {(oQtys[p.id]||0)>0&&<div style={{ fontSize:"0.72rem",color:"#f0c040",fontWeight:600 }}>= {((oQtys[p.id]||0)*p.sellPrice).toFixed(2)} лв.</div>}
+                  <div style={{ fontSize:"0.67rem",color:"#8888a0" }}>Склад: {p.qty} бр. · {fmt(p.sellPrice)}/бр.</div>
+                  {(oQtys[p.id]||0)>0&&<div style={{ fontSize:"0.72rem",color:"#f0c040",fontWeight:600 }}>= {fmt((oQtys[p.id]||0)*p.sellPrice)}</div>}
                 </div>
               </div>
-              {/* Ред 2: − | поле за число | + */}
               <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                 <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.max(0,(q[p.id]||0)-1)}))}
                   style={{ width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>−</button>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  min="0"
-                  max={p.qty}
+                <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max={p.qty}
                   value={oQtys[p.id]||0}
                   onChange={e=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,Math.max(0,parseInt(e.target.value)||0))}))}
-                  style={{ flex:1,background:"#0f0f14",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:(oQtys[p.id]||0)>0?"#f0c040":"#e8e8f0",borderRadius:10,padding:"10px",fontFamily:"Syne,sans-serif",fontSize:"1.2rem",fontWeight:800,outline:"none",textAlign:"center" }}
-                />
+                  style={{ flex:1,background:"#0f0f14",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:(oQtys[p.id]||0)>0?"#f0c040":"#e8e8f0",borderRadius:10,padding:"10px",fontFamily:"Syne,sans-serif",fontSize:"1.2rem",fontWeight:800,outline:"none",textAlign:"center" }} />
                 <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,(q[p.id]||0)+1)}))}
                   style={{ width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>+</button>
               </div>
             </div>
           ))}
         </div>
-      </Modal>
-
-      {/* ── ДЕТАЙЛИ ОБЕКТ ── */}
-      <Modal open={!!mSD} onClose={()=>setMSD(null)} title={detStore?.name||""}
-        footer={[<Btn key="o" full onClick={()=>{ setMSD(null); openOrder(mSD); }}>＋ Нова заявка</Btn>,<Btn key="c" v="sec" full onClick={()=>setMSD(null)}>Затвори</Btn>]}>
-        {detStore&&<>
-          <div style={{ ...card,padding:"10px 13px",marginBottom:14 }}>
-            <div style={{ fontSize:"0.80rem",marginBottom:4 }}>👤 {detStore.contact}</div>
-            <div style={{ fontSize:"0.76rem",color:"#8888a0",marginBottom:2 }}>📍 {detStore.address}</div>
-            <div style={{ fontSize:"0.76rem",color:"#8888a0" }}>📞 {detStore.phone}</div>
-          </div>
-          <div style={{ fontSize:"0.68rem",color:"#8888a0",textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:10 }}>Налично при обекта</div>
-          {products.map(p=>{ const q=(storeStock[mSD]||{})[p.id]||0; const c=q===0?"#f87171":q<10?"#fb923c":"#4ade80"; return (
-            <div key={p.id} style={{ display:"flex",alignItems:"center",gap:11,padding:"10px 0",borderBottom:"1px solid #1e1e2a" }}>
-              <Thumb p={p} size={44} />
-              <div style={{ flex:1,minWidth:0,fontSize:"0.84rem",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div>
-              <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,color:c,fontSize:"1rem",minWidth:28,textAlign:"right" }}>{q}</div>
-              <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" defaultValue={q}
-                onChange={e=>updateStock(mSD,p.id,parseInt(e.target.value)||0)}
-                style={{ ...IS,width:80,textAlign:"center" }} />
-            </div>
-          ); })}
-        </>}
       </Modal>
     </div>
   );
