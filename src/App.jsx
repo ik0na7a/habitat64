@@ -54,12 +54,6 @@ function Modal({ open, onClose, title, children, footer }) {
         {children}
         {footer&&<div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:20,paddingTop:16,borderTop:"1px solid #2a2a38" }}>{footer}</div>}
       </div>
-      <ConfirmModal
-        open={confirm.open}
-        message={confirm.message}
-        onConfirm={confirm.onOk}
-        onCancel={closeConfirm}
-      />
     </div>
   );
 }
@@ -85,12 +79,91 @@ function ConfirmModal({ open, message, onConfirm, onCancel }) {
           <button onClick={onConfirm} style={{ flex:1,background:"rgba(248,113,113,0.2)",border:"1px solid rgba(248,113,113,0.4)",color:"#f87171",borderRadius:10,padding:"12px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.90rem",fontWeight:600,cursor:"pointer" }}>✕ Изтрий</button>
         </div>
       </div>
-      <ConfirmModal
-        open={confirm.open}
-        message={confirm.message}
-        onConfirm={confirm.onOk}
-        onCancel={closeConfirm}
-      />
+    </div>
+  );
+}
+
+
+// ── HOLD TO DELETE BUTTON ─────────────────────────────────────
+// Задръж 2 секунди — бутонът се пълни с червено → изтрива
+function HoldToDelete({ onDelete, label = "✕ Изтрий" }) {
+  const [progress, setProgress] = useState(0);
+  const [holding,  setHolding]  = useState(false);
+  const timerRef    = useRef(null);
+  const intervalRef = useRef(null);
+  const DURATION    = 2000; // 2 секунди
+  const STEP        = 30;   // ms
+
+  const start = e => {
+    e.stopPropagation();
+    setHolding(true);
+    setProgress(0);
+    const startTime = Date.now();
+    intervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const pct = Math.min(100, (elapsed / DURATION) * 100);
+      setProgress(pct);
+      if (pct >= 100) {
+        clearInterval(intervalRef.current);
+        setHolding(false);
+        setProgress(0);
+        onDelete();
+      }
+    }, STEP);
+  };
+
+  const cancel = e => {
+    e && e.stopPropagation();
+    clearInterval(intervalRef.current);
+    clearTimeout(timerRef.current);
+    setHolding(false);
+    setProgress(0);
+  };
+
+  return (
+    <div
+      onMouseDown={start}
+      onMouseUp={cancel}
+      onMouseLeave={cancel}
+      onTouchStart={start}
+      onTouchEnd={cancel}
+      onTouchCancel={cancel}
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 10,
+        cursor: "pointer",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        background: holding ? "rgba(248,113,113,0.25)" : "rgba(248,113,113,0.15)",
+        border: `1px solid ${holding ? "rgba(248,113,113,0.7)" : "rgba(248,113,113,0.3)"}`,
+        padding: "8px 14px",
+        fontSize: "0.80rem",
+        fontWeight: 600,
+        color: "#f87171",
+        fontFamily: "'DM Sans',sans-serif",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 5,
+        minWidth: 90,
+        transition: "background 0.1s, border 0.1s",
+        touchAction: "none",
+      }}
+    >
+      {/* Progress fill */}
+      {holding && (
+        <div style={{
+          position: "absolute", left: 0, top: 0, bottom: 0,
+          width: `${progress}%`,
+          background: "rgba(248,113,113,0.35)",
+          transition: `width ${30}ms linear`,
+          pointerEvents: "none",
+        }} />
+      )}
+      <span style={{ position: "relative", zIndex: 1 }}>
+        {holding ? `${Math.round(progress)}%` : label}
+      </span>
     </div>
   );
 }
@@ -120,10 +193,6 @@ export default function App() {
   const [mRestock,   setMRestock]   = useState(false);
   const [mEdit,      setMEdit]      = useState(null);
   const [mStoreEdit, setMStoreEdit] = useState(null);
-
-  const [confirm, setConfirm] = useState({ open:false, message:"", onOk:null });
-  const askConfirm = (message, onOk) => setConfirm({ open:true, message, onOk });
-  const closeConfirm = () => setConfirm({ open:false, message:"", onOk:null });
 
   const emP = { name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:"",cat:"" };
   const emS = { name:"",addr:"",contact:"",phone:"",bulstat:"" };
@@ -218,7 +287,7 @@ export default function App() {
     const newP = products.map(p=>p.id===mEdit?{ ...p,name:eF.name||p.name,sku:eF.sku||p.sku,qty:parseInt(eF.qty)||0,buyPrice:parseFloat(eF.buy)||0,sellPrice:parseFloat(eF.sell)||0,minLevel:parseInt(eF.min)||10,image:eF.img,category:eF.cat }:p);
     setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMEdit(null);
   };
-  const deleteProd = id => askConfirm('Сигурни ли сте, че искате да изтриете този продукт?', () => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); closeConfirm(); });
+  const deleteProd = id => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); };
 
   const addStore = () => {
     if (!sF.name.trim()) return;
@@ -232,7 +301,7 @@ export default function App() {
     const newS = stores.map(s=>s.id===mStoreEdit?{ ...s,name:eSF.name||s.name,address:eSF.addr,contact:eSF.contact,phone:eSF.phone,bulstat:eSF.bulstat }:s);
     setStores(newS); persist(products,newS,orders,nextId,catOrder); setMStoreEdit(null);
   };
-  const deleteStore = id => askConfirm('Сигурни ли сте, че искате да изтриете този обект?', () => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); closeConfirm(); });
+  const deleteStore = id => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); };
 
   const submitOrder = () => {
     const items = products.filter(p=>oQtys[p.id]>0).map(p=>({ pid:p.id,qty:oQtys[p.id] }));
@@ -246,7 +315,7 @@ export default function App() {
   };
   const applyRestock = () => { const newP=products.map(p=>({ ...p,qty:p.qty+(rQtys[p.id]||0) })); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMRestock(false); };
   const deliverOrder = id => { const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
-  const deleteOrder  = id => askConfirm('Сигурни ли сте, че искате да изтриете тази заявка?', () => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); closeConfirm(); });
+  const deleteOrder  = id => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
 
   // ── LOADING ───────────────────────────────────────────────
   if (!ready) return (
@@ -464,7 +533,7 @@ export default function App() {
                     <div style={{ height:5,background:"#1e1e2a",borderRadius:3,overflow:"hidden",marginBottom:10 }}><div style={{ height:5,width:`${pct}%`,background:bc,borderRadius:3 }} /></div>
                     <div style={{ display:"flex",gap:8 }}>
                       <Btn v="edit" sm style={{ flex:1 }} onClick={()=>openEdit(p)}>✏️ Редактирай</Btn>
-                      <Btn v="del"  sm style={{ flex:1 }} onClick={()=>deleteProd(p.id)}>✕ Изтрий</Btn>
+                      <HoldToDelete onDelete={()=>deleteProd(p.id)} label="✕ Изтрий" />
                     </div>
                   </div>
                 </div>
@@ -516,11 +585,11 @@ export default function App() {
                   <span style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040" }}>{fmt(oval(o))}</span>
                   <div style={{ display:"flex",gap:7 }}>
                     {!isDone&&<Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}
-                    <Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn>
+                    <HoldToDelete onDelete={()=>deleteOrder(o.id)} label="✕" />
                   </div>
                 </div>
               </>}
-              {!isOpen&&<div style={{ display:"flex",justifyContent:"flex-end",marginTop:8 }}><Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn></div>}
+              {!isOpen&&<div style={{ display:"flex",justifyContent:"flex-end",marginTop:8 }}><HoldToDelete onDelete={()=>deleteOrder(o.id)} label="✕" /></div>}
             </div>
           );
         })}
@@ -545,7 +614,7 @@ export default function App() {
               </div>
               <div style={{ display:"flex",gap:6,flexShrink:0,marginLeft:10 }}>
                 <Btn v="edit" sm onClick={()=>openStoreEdit(s)}>✏️</Btn>
-                <Btn v="del"  sm onClick={()=>deleteStore(s.id)}>✕</Btn>
+                <HoldToDelete onDelete={()=>deleteStore(s.id)} label="✕" />
               </div>
             </div>
             <div style={{ display:"flex",flexDirection:"column",gap:7 }}>
@@ -710,12 +779,6 @@ export default function App() {
           ))}
         </div>
       </Modal>
-      <ConfirmModal
-        open={confirm.open}
-        message={confirm.message}
-        onConfirm={confirm.onOk}
-        onCancel={closeConfirm}
-      />
     </div>
   );
 }
