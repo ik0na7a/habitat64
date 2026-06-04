@@ -65,65 +65,23 @@ function StatusBar({ status }) {
   return <div style={{ position:"fixed",top:62,right:12,background:c.bg,border:`1px solid ${c.border}`,borderRadius:8,padding:"5px 12px",fontSize:"0.72rem",color:c.color,zIndex:150,fontWeight:600 }}>{c.text}</div>;
 }
 
-// ── DRAG & DROP HOOK ─────────────────────────────────────────
-function useDragSort(items, onReorder) {
-  const dragIdx   = useRef(null);
-  const itemRefs  = useRef([]);
-  const ghostRef  = useRef(null);
-  const startY    = useRef(0);
-  const [dragging, setDragging] = useState(null); // index being dragged
-  const [overIdx,  setOverIdx]  = useState(null);
-
-  const onTouchStart = useCallback((e, idx) => {
-    dragIdx.current = idx;
-    startY.current  = e.touches[0].clientY;
-    setDragging(idx);
-    setOverIdx(idx);
-    e.preventDefault();
-  }, []);
-
-  const onTouchMove = useCallback((e) => {
-    if (dragIdx.current === null) return;
-    e.preventDefault();
-    const y = e.touches[0].clientY;
-    let newOver = dragIdx.current;
-    itemRefs.current.forEach((ref, i) => {
-      if (!ref) return;
-      const rect = ref.getBoundingClientRect();
-      if (y > rect.top && y < rect.bottom) newOver = i;
-    });
-    setOverIdx(newOver);
-  }, []);
-
-  const onTouchEnd = useCallback(() => {
-    if (dragIdx.current !== null && overIdx !== null && dragIdx.current !== overIdx) {
-      const next = [...items];
-      const [moved] = next.splice(dragIdx.current, 1);
-      next.splice(overIdx, 0, moved);
-      onReorder(next);
-    }
-    dragIdx.current = null;
-    setDragging(null);
-    setOverIdx(null);
-  }, [items, overIdx, onReorder]);
-
-  return { dragging, overIdx, onTouchStart, onTouchMove, onTouchEnd, itemRefs };
-}
-
 // ══════════════════════════════════════════════════════════════
 export default function App() {
-  const [ready,      setReady]      = useState(false);
-  const [syncStatus, setSyncStatus] = useState("syncing");
-  const [page,       setPage]       = useState("dashboard");
-  const [products,   setProducts]   = useState([]);
-  const [stores,     setStores]     = useState([]);
-  const [orders,     setOrders]     = useState([]);
-  const [nextId,     setNextId]     = useState(1001);
+  const [ready,       setReady]       = useState(false);
+  const [syncStatus,  setSyncStatus]  = useState("syncing");
+  const [page,        setPage]        = useState("dashboard");
+  const [products,    setProducts]    = useState([]);
+  const [stores,      setStores]      = useState([]);
+  const [orders,      setOrders]      = useState([]);
+  const [nextId,      setNextId]      = useState(1001);
+  // category order — масив от имена в желания ред
+  const [catOrder,    setCatOrder]    = useState([]);
 
-  // inventory UI state
-  const [filterCat,  setFilterCat]  = useState("Всички");
-  const [sortMode,   setSortMode]   = useState("custom"); // custom | az | qty | price
-  const [showSort,   setShowSort]   = useState(false);
+  // inventory UI
+  const [filterCat,   setFilterCat]  = useState("Всички");
+  const [sortMode,    setSortMode]   = useState("az");
+  const [showSort,    setShowSort]   = useState(false);
+  const [showCatEdit, setShowCatEdit]= useState(false); // панел за наредждане на категории
 
   // modals
   const [mProd,      setMProd]      = useState(false);
@@ -144,9 +102,13 @@ export default function App() {
   const [oQtys, setOQtys] = useState({});
   const [rQtys, setRQtys] = useState({});
 
+  // ── LOAD ─────────────────────────────────────────────────
   function applyData(d) {
-    setProducts(d.products||[]); setStores(d.stores||[]);
-    setOrders(d.orders||[]);     setNextId(d.nextId||1001);
+    setProducts(d.products  || []);
+    setStores(d.stores      || []);
+    setOrders(d.orders      || []);
+    setNextId(d.nextId      || 1001);
+    setCatOrder(d.catOrder  || []);
   }
 
   useEffect(() => {
@@ -159,16 +121,17 @@ export default function App() {
           const winner = (remote?.nextId||0) >= (local?.nextId||0) ? remote : local;
           applyData(winner); lsSave(winner);
         }
-        setSyncStatus("saved"); setTimeout(() => setSyncStatus(null), 2000);
+        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
       } catch(e) {
-        setSyncStatus(local ? "saved" : "error"); setTimeout(() => setSyncStatus(null), 3000);
+        setSyncStatus(local?"saved":"error"); setTimeout(()=>setSyncStatus(null),3000);
       } finally { setReady(true); }
     })();
   }, []);
 
+  // ── SAVE ─────────────────────────────────────────────────
   const binTimer = useRef(null);
-  const persist  = useCallback((p, s, o, nid) => {
-    const data = { products:p, stores:s, orders:o, nextId:nid };
+  const persist  = useCallback((p, s, o, nid, co) => {
+    const data = { products:p, stores:s, orders:o, nextId:nid, catOrder:co };
     lsSave(data); setSyncStatus("saving"); clearTimeout(binTimer.current);
     binTimer.current = setTimeout(async () => {
       try { await binSave(data); setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000); }
@@ -176,6 +139,7 @@ export default function App() {
     }, 1000);
   }, []);
 
+  // ── HELPERS ───────────────────────────────────────────────
   const oval   = o => o.items.reduce((s,i)=>{ const p=products.find(x=>x.id===i.pid); return s+(p?p.sellPrice*i.qty:0); },0);
   const ototal = products.reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
 
@@ -185,34 +149,56 @@ export default function App() {
     setODate(new Date().toISOString().split("T")[0]); setMOrder(true);
   };
 
+  // ── CATEGORY ORDER HELPERS ────────────────────────────────
+  // Взима всички уникални категории от продуктите, спазвайки запазения ред
+  const getOrderedCats = useCallback(() => {
+    const fromProducts = Array.from(new Set(products.map(p=>p.category||"").filter(Boolean)));
+    // Първо поставяме запазения ред, после добавяме нови
+    const ordered = catOrder.filter(c => fromProducts.includes(c));
+    const newOnes  = fromProducts.filter(c => !ordered.includes(c));
+    return [...ordered, ...newOnes];
+  }, [products, catOrder]);
+
+  const moveCat = (cat, dir) => {
+    const list = getOrderedCats();
+    const idx  = list.indexOf(cat);
+    if (dir === -1 && idx === 0) return;
+    if (dir ===  1 && idx === list.length-1) return;
+    const next = [...list];
+    [next[idx], next[idx+dir]] = [next[idx+dir], next[idx]];
+    setCatOrder(next);
+    persist(products, stores, orders, nextId, next);
+  };
+
+  // ── CRUD ─────────────────────────────────────────────────
   const addProd = () => {
     if (!pF.name.trim()) return;
     const nid = products.length ? Math.max(...products.map(p=>p.id))+1 : 1;
     const np  = { id:nid, name:pF.name, sku:pF.sku||`SKU-${nid}`, qty:parseInt(pF.qty)||0, buyPrice:parseFloat(pF.buy)||0, sellPrice:parseFloat(pF.sell)||0, minLevel:parseInt(pF.min)||10, image:pF.img, category:pF.cat };
     const newP = [...products, np];
-    setProducts(newP); persist(newP, stores, orders, nextId); setPF(emP); setMProd(false);
+    setProducts(newP); persist(newP, stores, orders, nextId, catOrder); setPF(emP); setMProd(false);
   };
 
   const openEdit = p => { setEF({ name:p.name,sku:p.sku,qty:String(p.qty),buy:String(p.buyPrice),sell:String(p.sellPrice),min:String(p.minLevel),img:p.image||"",cat:p.category||"" }); setMEdit(p.id); };
   const saveEdit = () => {
     const newP = products.map(p=>p.id===mEdit?{ ...p,name:eF.name||p.name,sku:eF.sku||p.sku,qty:parseInt(eF.qty)||0,buyPrice:parseFloat(eF.buy)||0,sellPrice:parseFloat(eF.sell)||0,minLevel:parseInt(eF.min)||10,image:eF.img,category:eF.cat }:p);
-    setProducts(newP); persist(newP,stores,orders,nextId); setMEdit(null);
+    setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMEdit(null);
   };
-  const deleteProd = id => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId); };
+  const deleteProd = id => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); };
 
   const addStore = () => {
     if (!sF.name.trim()) return;
     const nid = stores.length ? Math.max(...stores.map(s=>s.id))+1 : 1;
     const ns  = { id:nid, name:sF.name, address:sF.addr, contact:sF.contact, phone:sF.phone, bulstat:sF.bulstat };
     const newS = [...stores, ns];
-    setStores(newS); persist(products,newS,orders,nextId); setSF(emS); setMStore(false);
+    setStores(newS); persist(products,newS,orders,nextId,catOrder); setSF(emS); setMStore(false);
   };
   const openStoreEdit = s => { setESF({ name:s.name,addr:s.address,contact:s.contact,phone:s.phone,bulstat:s.bulstat||"" }); setMStoreEdit(s.id); };
   const saveStoreEdit = () => {
     const newS = stores.map(s=>s.id===mStoreEdit?{ ...s,name:eSF.name||s.name,address:eSF.addr,contact:eSF.contact,phone:eSF.phone,bulstat:eSF.bulstat }:s);
-    setStores(newS); persist(products,newS,orders,nextId); setMStoreEdit(null);
+    setStores(newS); persist(products,newS,orders,nextId,catOrder); setMStoreEdit(null);
   };
-  const deleteStore = id => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId); };
+  const deleteStore = id => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); };
 
   const submitOrder = () => {
     const items = products.filter(p=>oQtys[p.id]>0).map(p=>({ pid:p.id,qty:oQtys[p.id] }));
@@ -222,17 +208,13 @@ export default function App() {
     const newP=products.map(p=>({ ...p,qty:Math.max(0,p.qty-(oQtys[p.id]||0)) }));
     const newNid=nextId+1;
     setOrders(newO); setProducts(newP); setNextId(newNid);
-    persist(newP,stores,newO,newNid); setMOrder(false); setPage("orders");
+    persist(newP,stores,newO,newNid,catOrder); setMOrder(false); setPage("orders");
   };
-  const applyRestock = () => { const newP=products.map(p=>({ ...p,qty:p.qty+(rQtys[p.id]||0) })); setProducts(newP); persist(newP,stores,orders,nextId); setMRestock(false); };
-  const deliverOrder = id => { const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,newO,nextId); };
-  const deleteOrder  = id => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId); };
+  const applyRestock = () => { const newP=products.map(p=>({ ...p,qty:p.qty+(rQtys[p.id]||0) })); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMRestock(false); };
+  const deliverOrder = id => { const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
+  const deleteOrder  = id => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
 
-  // ── REORDER callback ───────────────────────────────────────
-  const handleReorder = useCallback(newList => {
-    setProducts(newList); persist(newList, stores, orders, nextId);
-  }, [stores, orders, nextId, persist]);
-
+  // ── LOADING ───────────────────────────────────────────────
   if (!ready) return (
     <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f0f14",color:"#e8e8f0",gap:20 }}>
       <style>{`@keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}`}</style>
@@ -246,11 +228,9 @@ export default function App() {
   const numIS    = { ...IS,fontSize:"1.1rem",textAlign:"center",padding:"14px" };
   const editProd = products.find(p=>p.id===mEdit);
   const editSt   = stores.find(s=>s.id===mStoreEdit);
+  const orderedCats = getOrderedCats();
 
-  // ── ALL CATEGORIES ─────────────────────────────────────────
-  const allCats = ["Всички", ...Array.from(new Set(products.map(p=>p.category||"").filter(Boolean)))];
-
-  // ── SORTED + FILTERED LIST ─────────────────────────────────
+  // ── SORTED + FILTERED LIST ────────────────────────────────
   const visibleProducts = (() => {
     let list = [...products];
     if (filterCat !== "Всички") list = list.filter(p=>(p.category||"")=== filterCat);
@@ -320,76 +300,7 @@ export default function App() {
     );
   };
 
-  // ── INVENTORY with drag-and-drop ───────────────────────────
-  const InventoryInner = () => {
-    const { dragging, overIdx, onTouchStart, onTouchMove, onTouchEnd, itemRefs } = useDragSort(
-      sortMode === "custom" ? products : visibleProducts,
-      sortMode === "custom" ? handleReorder : ()=>{}
-    );
-
-    return (
-      <div
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
-        style={{ display:"flex",flexDirection:"column",gap:14 }}
-      >
-        {visibleProducts.map((p, idx) => {
-          const st  = p.qty===0?"out":p.qty<=p.minLevel?"low":"ok";
-          const bc  = st==="ok"?"#4ade80":st==="low"?"#fb923c":"#f87171";
-          const pct = p.minLevel>0?Math.min(100,Math.round(p.qty/(p.minLevel*3)*100)):100;
-          const isDragging = dragging===idx;
-          const isOver     = overIdx===idx && dragging!==null && dragging!==idx;
-
-          return (
-            <div key={p.id} ref={el=>itemRefs.current[idx]=el}
-              style={{ ...card,overflow:"hidden",opacity:isDragging?0.4:1,transform:isOver?"scale(1.02)":"scale(1)",transition:"transform 0.1s,opacity 0.1s",border:isOver?"1px solid #f0c040":card.border }}>
-
-              {/* IMAGE */}
-              <div style={{ height:150,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden" }}>
-                {p.image
-                  ? <img src={p.image} alt={p.name} onError={e=>{e.target.style.display="none";}} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
-                  : <div style={{ fontSize:"4.5rem" }}>{EMOJIS[(p.id-1)%EMOJIS.length]||"📦"}</div>
-                }
-                <div style={{ position:"absolute",top:10,right:10 }}><Badge t={st}>{st==="ok"?"ОК":st==="low"?"Нисък":"Изчерпан"}</Badge></div>
-                {p.category && <div style={{ position:"absolute",top:10,left:10,background:"rgba(0,0,0,0.55)",borderRadius:6,padding:"3px 8px",fontSize:"0.68rem",color:"#f0c040",fontWeight:600 }}>{p.category}</div>}
-
-                {/* DRAG HANDLE — видим само при custom сортиране */}
-                {sortMode==="custom" && (
-                  <div
-                    onTouchStart={e=>onTouchStart(e,idx)}
-                    style={{ position:"absolute",bottom:10,right:10,width:36,height:36,background:"rgba(0,0,0,0.6)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",cursor:"grab",fontSize:"1.1rem",touchAction:"none",userSelect:"none" }}
-                  >☰</div>
-                )}
-              </div>
-
-              <div style={{ padding:"13px 14px" }}>
-                <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.95rem",lineHeight:1.3,marginBottom:10 }}>{p.name}</div>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8 }}>
-                  <div>
-                    <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase" }}>Налично</div>
-                    <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.8rem",color:bc,lineHeight:1 }}>{p.qty}</div>
-                    <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>бр.</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase" }}>Продажна цена</div>
-                    <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1.15rem",color:"#f0c040" }}>{fmt(p.sellPrice)}</div>
-                    <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>купуване {fmt(p.buyPrice)}</div>
-                  </div>
-                </div>
-                <div style={{ height:5,background:"#1e1e2a",borderRadius:3,overflow:"hidden",marginBottom:10 }}><div style={{ height:5,width:`${pct}%`,background:bc,borderRadius:3 }} /></div>
-                <div style={{ display:"flex",gap:8 }}>
-                  <Btn v="edit" sm style={{ flex:1 }} onClick={()=>openEdit(p)}>✏️ Редактирай</Btn>
-                  <Btn v="del"  sm style={{ flex:1 }} onClick={()=>deleteProd(p.id)}>✕ Изтрий</Btn>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
+  // ── INVENTORY ─────────────────────────────────────────────
   const Inventory = () => (
     <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
       {/* ACTION BUTTONS */}
@@ -398,18 +309,18 @@ export default function App() {
         <Btn sm style={{ flex:1 }} onClick={()=>setMProd(true)}>＋ Нов</Btn>
       </div>
 
-      {/* SORT PICKER */}
+      {/* SORT */}
       <div style={{ ...card,padding:"12px 14px" }}>
-        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom: showSort?12:0 }} onClick={()=>setShowSort(s=>!s)}>
-          <div style={{ fontSize:"0.80rem",fontWeight:600,color:"#e8e8f0",display:"flex",alignItems:"center",gap:6 }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }} onClick={()=>setShowSort(s=>!s)}>
+          <div style={{ fontSize:"0.80rem",fontWeight:600,display:"flex",alignItems:"center",gap:6 }}>
             <span>⚙️</span>
-            <span>Сортиране: <span style={{ color:"#f0c040" }}>{sortMode==="custom"?"Ръчно":sortMode==="az"?"А-Я":sortMode==="qty"?"Количество":"Цена"}</span></span>
+            <span>Сортиране: <span style={{ color:"#f0c040" }}>{sortMode==="az"?"А → Я":sortMode==="qty"?"По количество":"По цена"}</span></span>
           </div>
-          <span style={{ color:"#8888a0",fontSize:"0.8rem",transition:"transform 0.2s",display:"inline-block",transform:showSort?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
+          <span style={{ color:"#8888a0",fontSize:"0.8rem",display:"inline-block",transition:"transform 0.2s",transform:showSort?"rotate(180deg)":"rotate(0deg)" }}>▼</span>
         </div>
-        {showSort && (
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-            {[["custom","☰ Ръчно"],["az","А → Я"],["qty","По количество"],["price","По цена"]].map(([mode,lbl])=>(
+        {showSort&&(
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12 }}>
+            {[["az","А → Я"],["qty","По количество"],["price","По цена"]].map(([mode,lbl])=>(
               <button key={mode} onClick={()=>{ setSortMode(mode); setShowSort(false); }}
                 style={{ background:sortMode===mode?"rgba(240,192,64,0.15)":"#1e1e2a",border:`1px solid ${sortMode===mode?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:sortMode===mode?"#f0c040":"#8888a0",borderRadius:8,padding:"8px 10px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.80rem",fontWeight:600,cursor:"pointer" }}>
                 {lbl}
@@ -419,27 +330,116 @@ export default function App() {
         )}
       </div>
 
-      {/* CATEGORY FILTER PILLS */}
-      {allCats.length > 1 && (
-        <div style={{ display:"flex",gap:8,overflowX:"auto",paddingBottom:4 }}>
-          {allCats.map(cat=>(
-            <button key={cat} onClick={()=>setFilterCat(cat)}
-              style={{ background:filterCat===cat?"#f0c040":"#1e1e2a",color:filterCat===cat?"#0f0f14":"#8888a0",border:`1px solid ${filterCat===cat?"#f0c040":"#2a2a38"}`,borderRadius:20,padding:"6px 14px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>
-              {cat}
+      {/* CATEGORY PILLS + EDIT BUTTON */}
+      {orderedCats.length > 0 && (
+        <div>
+          {/* Pills row */}
+          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            <div style={{ display:"flex",gap:8,overflowX:"auto",flex:1,paddingBottom:4 }}>
+              {/* "Всички" pill */}
+              <button onClick={()=>setFilterCat("Всички")}
+                style={{ background:filterCat==="Всички"?"#f0c040":"#1e1e2a",color:filterCat==="Всички"?"#0f0f14":"#8888a0",border:`1px solid ${filterCat==="Всички"?"#f0c040":"#2a2a38"}`,borderRadius:20,padding:"6px 14px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>
+                Всички
+              </button>
+              {orderedCats.map(cat=>(
+                <button key={cat} onClick={()=>setFilterCat(cat)}
+                  style={{ background:filterCat===cat?"#f0c040":"#1e1e2a",color:filterCat===cat?"#0f0f14":"#8888a0",border:`1px solid ${filterCat===cat?"#f0c040":"#2a2a38"}`,borderRadius:20,padding:"6px 14px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>
+                  {cat}
+                </button>
+              ))}
+            </div>
+            {/* EDIT ORDER BUTTON */}
+            <button onClick={()=>setShowCatEdit(true)} title="Промени реда на категориите"
+              style={{ background:"rgba(240,192,64,0.12)",border:"1px solid rgba(240,192,64,0.3)",color:"#f0c040",borderRadius:10,width:38,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,fontSize:"1rem" }}>
+              ↕
             </button>
-          ))}
+          </div>
         </div>
       )}
 
-      {sortMode==="custom" && filterCat==="Всички" && (
-        <div style={{ fontSize:"0.72rem",color:"#8888a0",textAlign:"center",padding:"4px 0" }}>
-          ☰ Задръж и плъзни карта за да я преместиш
+      {/* CATEGORY REORDER PANEL */}
+      {showCatEdit && orderedCats.length > 0 && (
+        <div style={{ ...card,padding:"14px 16px" }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12 }}>
+            <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.88rem" }}>↕ Наредждане на категории</div>
+            <button onClick={()=>setShowCatEdit(false)} style={{ background:"none",border:"none",color:"#8888a0",cursor:"pointer",fontSize:"1.1rem",padding:"2px 6px" }}>✕</button>
+          </div>
+          <div style={{ fontSize:"0.72rem",color:"#8888a0",marginBottom:10 }}>Натисни ↑ ↓ за да промениш реда — първите се показват вляво</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+            {orderedCats.map((cat, idx) => {
+              const count = products.filter(p=>(p.category||"")===cat).length;
+              return (
+                <div key={cat} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"10px 14px" }}>
+                  {/* Position number */}
+                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1rem",color:"#f0c040",minWidth:24,textAlign:"center" }}>{idx+1}</div>
+                  {/* Category name + count */}
+                  <div style={{ flex:1,minWidth:0 }}>
+                    <div style={{ fontWeight:600,fontSize:"0.88rem" }}>{cat}</div>
+                    <div style={{ fontSize:"0.68rem",color:"#8888a0" }}>{count} продукта</div>
+                  </div>
+                  {/* UP / DOWN buttons */}
+                  <div style={{ display:"flex",gap:6 }}>
+                    <button onClick={()=>moveCat(cat,-1)} disabled={idx===0}
+                      style={{ width:36,height:36,background:idx===0?"#1a1a24":"#2a2a38",border:`1px solid ${idx===0?"#1e1e2a":"#3a3a48"}`,color:idx===0?"#3a3a48":"#e8e8f0",borderRadius:8,cursor:idx===0?"default":"pointer",fontSize:"1rem",display:"flex",alignItems:"center",justifyContent:"center" }}>
+                      ↑
+                    </button>
+                    <button onClick={()=>moveCat(cat,1)} disabled={idx===orderedCats.length-1}
+                      style={{ width:36,height:36,background:idx===orderedCats.length-1?"#1a1a24":"#2a2a38",border:`1px solid ${idx===orderedCats.length-1?"#1e1e2a":"#3a3a48"}`,color:idx===orderedCats.length-1?"#3a3a48":"#e8e8f0",borderRadius:8,cursor:idx===orderedCats.length-1?"default":"pointer",fontSize:"1rem",display:"flex",alignItems:"center",justifyContent:"center" }}>
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop:12 }}>
+            <Btn full v="sec" onClick={()=>setShowCatEdit(false)}>✓ Готово</Btn>
+          </div>
         </div>
       )}
 
+      {/* PRODUCT CARDS */}
       {products.length===0
         ? <div style={{ ...card,padding:40,textAlign:"center",color:"#8888a0" }}>Няма продукти. Натисни „+ Нов".</div>
-        : <InventoryInner />
+        : <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+            {visibleProducts.map(p => {
+              const st  = p.qty===0?"out":p.qty<=p.minLevel?"low":"ok";
+              const bc  = st==="ok"?"#4ade80":st==="low"?"#fb923c":"#f87171";
+              const pct = p.minLevel>0?Math.min(100,Math.round(p.qty/(p.minLevel*3)*100)):100;
+              return (
+                <div key={p.id} style={{ ...card,overflow:"hidden" }}>
+                  <div style={{ height:150,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden" }}>
+                    {p.image
+                      ? <img src={p.image} alt={p.name} onError={e=>e.target.style.display="none"} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+                      : <div style={{ fontSize:"4.5rem" }}>{EMOJIS[(p.id-1)%EMOJIS.length]||"📦"}</div>
+                    }
+                    <div style={{ position:"absolute",top:10,right:10 }}><Badge t={st}>{st==="ok"?"ОК":st==="low"?"Нисък":"Изчерпан"}</Badge></div>
+                    {p.category&&<div style={{ position:"absolute",top:10,left:10,background:"rgba(0,0,0,0.55)",borderRadius:6,padding:"3px 8px",fontSize:"0.68rem",color:"#f0c040",fontWeight:600 }}>{p.category}</div>}
+                  </div>
+                  <div style={{ padding:"13px 14px" }}>
+                    <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.95rem",lineHeight:1.3,marginBottom:10 }}>{p.name}</div>
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8 }}>
+                      <div>
+                        <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase" }}>Налично</div>
+                        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.8rem",color:bc,lineHeight:1 }}>{p.qty}</div>
+                        <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>бр.</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:"0.63rem",color:"#8888a0",textTransform:"uppercase" }}>Продажна цена</div>
+                        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1.15rem",color:"#f0c040" }}>{fmt(p.sellPrice)}</div>
+                        <div style={{ fontSize:"0.63rem",color:"#8888a0" }}>купуване {fmt(p.buyPrice)}</div>
+                      </div>
+                    </div>
+                    <div style={{ height:5,background:"#1e1e2a",borderRadius:3,overflow:"hidden",marginBottom:10 }}><div style={{ height:5,width:`${pct}%`,background:bc,borderRadius:3 }} /></div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <Btn v="edit" sm style={{ flex:1 }} onClick={()=>openEdit(p)}>✏️ Редактирай</Btn>
+                      <Btn v="del"  sm style={{ flex:1 }} onClick={()=>deleteProd(p.id)}>✕ Изтрий</Btn>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
       }
     </div>
   );
