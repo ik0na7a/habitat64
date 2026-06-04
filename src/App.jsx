@@ -8,14 +8,40 @@ const LS_KEY  = "habitat64_data";
 
 function lsSave(d) { try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch {} }
 function lsLoad() { try { const d = localStorage.getItem(LS_KEY); return d ? JSON.parse(d) : null; } catch { return null; } }
-async function binSave(data) {
-  const res = await fetch(BIN_URL, { method:"PUT", headers:HEADERS, body:JSON.stringify(data) });
-  if (!res.ok) throw new Error(res.status);
-}
+
 async function binLoad() {
   const res = await fetch(`${BIN_URL}/latest`, { headers:HEADERS });
   if (!res.ok) throw new Error(res.status);
   return (await res.json()).record;
+}
+
+// Умно сливане — НЕ презаписва, а добавя новото към вече съществуващото
+async function binMergeSave(localData) {
+  let remote = null;
+  try { remote = await binLoad(); } catch(e) {}
+
+  let merged = localData;
+  if (remote && remote.products !== undefined) {
+    // Слива по ID — ако и двете устройства имат един продукт, локалното печели
+    const mergeById = (local, rem) => {
+      const map = {};
+      (rem  ||[]).forEach(x => map[x.id] = x);
+      (local||[]).forEach(x => map[x.id] = x); // локалното презаписва
+      return Object.values(map).sort((a,b)=>a.id-b.id);
+    };
+    merged = {
+      products: mergeById(localData.products, remote.products),
+      stores:   mergeById(localData.stores,   remote.stores),
+      orders:   mergeById(localData.orders,   remote.orders),
+      nextId:   Math.max(localData.nextId||0, remote.nextId||0),
+      catOrder: localData.catOrder || remote.catOrder || [],
+    };
+    lsSave(merged); // запази слятото локално
+  }
+
+  const res = await fetch(BIN_URL, { method:"PUT", headers:HEADERS, body:JSON.stringify(merged) });
+  if (!res.ok) throw new Error(res.status);
+  return merged;
 }
 
 const EMOJIS = ["🍬","🥛","💧","🫙","🍚","🧃","🥤","🍫","🥚","🧀","🌽","🍎","🧴","🫧","🧹"];
@@ -59,10 +85,19 @@ function Modal({ open, onClose, title, children, footer }) {
 }
 
 function StatusBar({ status }) {
-  const cfg = { saving:{bg:"rgba(240,192,64,0.15)",border:"rgba(240,192,64,0.4)",color:"#f0c040",text:"💾 Запазва се..."},saved:{bg:"rgba(74,222,128,0.12)",border:"rgba(74,222,128,0.35)",color:"#4ade80",text:"✓ Запазено"},error:{bg:"rgba(248,113,113,0.15)",border:"rgba(248,113,113,0.4)",color:"#f87171",text:"⚠ Запазено локално"},syncing:{bg:"rgba(78,205,196,0.12)",border:"rgba(78,205,196,0.35)",color:"#4ecdc4",text:"🔄 Синхронизира..."} };
+  const cfg = {
+    saving:  { bg:"rgba(240,192,64,0.95)",  color:"#0f0f14", text:"💾 Запазва се..." },
+    saved:   { bg:"rgba(74,222,128,0.95)",  color:"#0f0f14", text:"✓ Запазено" },
+    error:   { bg:"rgba(248,113,113,0.95)", color:"#fff",    text:"⚠ Проблем — опитай пак" },
+    syncing: { bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Синхронизира..." },
+  };
   if (!status||!cfg[status]) return null;
   const c=cfg[status];
-  return <div style={{ position:"fixed",top:62,right:12,background:c.bg,border:`1px solid ${c.border}`,borderRadius:8,padding:"5px 12px",fontSize:"0.72rem",color:c.color,zIndex:150,fontWeight:600 }}>{c.text}</div>;
+  return (
+    <div style={{ position:"fixed",top:58,left:"50%",transform:"translateX(-50%)",background:c.bg,borderRadius:20,padding:"6px 18px",fontSize:"0.78rem",color:c.color,zIndex:150,fontWeight:700,boxShadow:"0 2px 12px rgba(0,0,0,0.4)",whiteSpace:"nowrap" }}>
+      {c.text}
+    </div>
+  );
 }
 
 
@@ -235,11 +270,17 @@ export default function App() {
   const binTimer = useRef(null);
   const persist  = useCallback((p, s, o, nid, co) => {
     const data = { products:p, stores:s, orders:o, nextId:nid, catOrder:co };
-    lsSave(data); setSyncStatus("saving"); clearTimeout(binTimer.current);
+    lsSave(data); // ВЕДНАГА в localStorage
+    setSyncStatus("saving");
+    clearTimeout(binTimer.current);
     binTimer.current = setTimeout(async () => {
-      try { await binSave(data); setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000); }
+      try {
+        await binMergeSave(data); // умно сливане вместо презаписване
+        setSyncStatus("saved");
+        setTimeout(()=>setSyncStatus(null),2500);
+      }
       catch(e) { setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000); }
-    }, 1000);
+    }, 400); // 400ms debounce — по-бързо от преди
   }, []);
 
   // ── HELPERS ───────────────────────────────────────────────
