@@ -54,6 +54,12 @@ function Modal({ open, onClose, title, children, footer }) {
         {children}
         {footer&&<div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:20,paddingTop:16,borderTop:"1px solid #2a2a38" }}>{footer}</div>}
       </div>
+      <ConfirmModal
+        open={confirm.open}
+        message={confirm.message}
+        onConfirm={confirm.onOk}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }
@@ -63,6 +69,30 @@ function StatusBar({ status }) {
   if (!status||!cfg[status]) return null;
   const c=cfg[status];
   return <div style={{ position:"fixed",top:62,right:12,background:c.bg,border:`1px solid ${c.border}`,borderRadius:8,padding:"5px 12px",fontSize:"0.72rem",color:c.color,zIndex:150,fontWeight:600 }}>{c.text}</div>;
+}
+
+
+function ConfirmModal({ open, message, onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20 }}>
+      <div style={{ background:"#16161e",border:"1px solid #2a2a38",borderRadius:16,padding:"28px 24px",width:"100%",maxWidth:340,textAlign:"center" }}>
+        <div style={{ fontSize:"2rem",marginBottom:14 }}>⚠️</div>
+        <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",marginBottom:8 }}>Потвърждение</div>
+        <div style={{ fontSize:"0.88rem",color:"#8888a0",marginBottom:24,lineHeight:1.5 }}>{message}</div>
+        <div style={{ display:"flex",gap:10 }}>
+          <button onClick={onCancel} style={{ flex:1,background:"#1e1e2a",border:"1px solid #2a2a38",color:"#e8e8f0",borderRadius:10,padding:"12px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.90rem",fontWeight:600,cursor:"pointer" }}>Отказ</button>
+          <button onClick={onConfirm} style={{ flex:1,background:"rgba(248,113,113,0.2)",border:"1px solid rgba(248,113,113,0.4)",color:"#f87171",borderRadius:10,padding:"12px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.90rem",fontWeight:600,cursor:"pointer" }}>✕ Изтрий</button>
+        </div>
+      </div>
+      <ConfirmModal
+        open={confirm.open}
+        message={confirm.message}
+        onConfirm={confirm.onOk}
+        onCancel={closeConfirm}
+      />
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -90,6 +120,10 @@ export default function App() {
   const [mRestock,   setMRestock]   = useState(false);
   const [mEdit,      setMEdit]      = useState(null);
   const [mStoreEdit, setMStoreEdit] = useState(null);
+
+  const [confirm, setConfirm] = useState({ open:false, message:"", onOk:null });
+  const askConfirm = (message, onOk) => setConfirm({ open:true, message, onOk });
+  const closeConfirm = () => setConfirm({ open:false, message:"", onOk:null });
 
   const emP = { name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:"",cat:"" };
   const emS = { name:"",addr:"",contact:"",phone:"",bulstat:"" };
@@ -184,7 +218,7 @@ export default function App() {
     const newP = products.map(p=>p.id===mEdit?{ ...p,name:eF.name||p.name,sku:eF.sku||p.sku,qty:parseInt(eF.qty)||0,buyPrice:parseFloat(eF.buy)||0,sellPrice:parseFloat(eF.sell)||0,minLevel:parseInt(eF.min)||10,image:eF.img,category:eF.cat }:p);
     setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMEdit(null);
   };
-  const deleteProd = id => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); };
+  const deleteProd = id => askConfirm('Сигурни ли сте, че искате да изтриете този продукт?', () => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); closeConfirm(); });
 
   const addStore = () => {
     if (!sF.name.trim()) return;
@@ -198,7 +232,7 @@ export default function App() {
     const newS = stores.map(s=>s.id===mStoreEdit?{ ...s,name:eSF.name||s.name,address:eSF.addr,contact:eSF.contact,phone:eSF.phone,bulstat:eSF.bulstat }:s);
     setStores(newS); persist(products,newS,orders,nextId,catOrder); setMStoreEdit(null);
   };
-  const deleteStore = id => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); };
+  const deleteStore = id => askConfirm('Сигурни ли сте, че искате да изтриете този обект?', () => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); closeConfirm(); });
 
   const submitOrder = () => {
     const items = products.filter(p=>oQtys[p.id]>0).map(p=>({ pid:p.id,qty:oQtys[p.id] }));
@@ -212,7 +246,7 @@ export default function App() {
   };
   const applyRestock = () => { const newP=products.map(p=>({ ...p,qty:p.qty+(rQtys[p.id]||0) })); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMRestock(false); };
   const deliverOrder = id => { const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
-  const deleteOrder  = id => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
+  const deleteOrder  = id => askConfirm('Сигурни ли сте, че искате да изтриете тази заявка?', () => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); closeConfirm(); });
 
   // ── LOADING ───────────────────────────────────────────────
   if (!ready) return (
@@ -676,6 +710,12 @@ export default function App() {
           ))}
         </div>
       </Modal>
+      <ConfirmModal
+        open={confirm.open}
+        message={confirm.message}
+        onConfirm={confirm.onOk}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }
