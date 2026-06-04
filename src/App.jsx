@@ -326,6 +326,10 @@ export default function App() {
                 {lbl}
               </button>
             ))}
+            <button onClick={()=>{ setShowCatEdit(c=>!c); setShowSort(false); }}
+              style={{ background:showCatEdit?"rgba(240,192,64,0.15)":"#1e1e2a",border:`1px solid ${showCatEdit?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:showCatEdit?"#f0c040":"#8888a0",borderRadius:8,padding:"8px 10px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.80rem",fontWeight:600,cursor:"pointer" }}>
+              ↕ Ред на категории
+            </button>
           </div>
         )}
       </div>
@@ -334,8 +338,7 @@ export default function App() {
       {orderedCats.length > 0 && (
         <div>
           {/* Pills row */}
-          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-            <div style={{ display:"flex",gap:8,overflowX:"auto",flex:1,paddingBottom:4 }}>
+          <div style={{ display:"flex",gap:8,overflowX:"auto",paddingBottom:4 }}>
               {/* "Всички" pill */}
               <button onClick={()=>setFilterCat("Всички")}
                 style={{ background:filterCat==="Всички"?"#f0c040":"#1e1e2a",color:filterCat==="Всички"?"#0f0f14":"#8888a0",border:`1px solid ${filterCat==="Всички"?"#f0c040":"#2a2a38"}`,borderRadius:20,padding:"6px 14px",fontFamily:"'DM Sans',sans-serif",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>
@@ -347,12 +350,6 @@ export default function App() {
                   {cat}
                 </button>
               ))}
-            </div>
-            {/* EDIT ORDER BUTTON */}
-            <button onClick={()=>setShowCatEdit(true)} title="Промени реда на категориите"
-              style={{ background:"rgba(240,192,64,0.12)",border:"1px solid rgba(240,192,64,0.3)",color:"#f0c040",borderRadius:10,width:38,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,fontSize:"1rem" }}>
-              ↕
-            </button>
           </div>
         </div>
       )}
@@ -445,46 +442,57 @@ export default function App() {
   );
 
   // ── ORDERS ────────────────────────────────────────────────
-  const Orders = () => (
-    <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-      <Btn full onClick={()=>openOrder()}>＋ Нова заявка</Btn>
-      {orders.length===0&&<div style={{ ...card,padding:50,textAlign:"center",color:"#8888a0" }}>📋 Няма заявки</div>}
-      {[...orders].sort((a,b)=>b.id-a.id).map(o=>{
-        const store=stores.find(s=>s.id===o.storeId);
-        return (
-          <div key={o.id} style={{ ...card,padding:"14px 14px" }}>
-            <div style={{ display:"flex",alignItems:"center",gap:8,background:o.status==="pending"?"rgba(240,192,64,0.10)":"rgba(78,205,196,0.08)",border:`1px solid ${o.status==="pending"?"rgba(240,192,64,0.3)":"rgba(78,205,196,0.22)"}`,borderRadius:10,padding:"9px 12px",marginBottom:12 }}>
-              <span style={{ fontSize:"1.2rem" }}>🏪</span>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",color:o.status==="pending"?"#f0c040":"#4ecdc4",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{store?.name}</div>
-                <div style={{ fontSize:"0.67rem",color:"#8888a0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>📍 {store?.address}</div>
-              </div>
-              <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3 }}>
-                <Badge t={o.status==="pending"?"pending":"done"}>{o.status==="pending"?"Чакаща":"Доставена"}</Badge>
-                <span style={{ fontSize:"0.63rem",color:"#8888a0" }}>#{o.id} · {o.date}</span>
-              </div>
-            </div>
-            <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:12 }}>
-              {o.items.map(item=>{ const p=products.find(x=>x.id===item.pid); if(!p)return null; return (
-                <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
-                  <Thumb p={p} size={48} />
-                  <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:"0.84rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div><div style={{ fontSize:"0.67rem",color:"#8888a0" }}>{fmt(p.sellPrice*item.qty)}</div></div>
-                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.35rem",color:"#f0c040" }}>×{item.qty}</div>
+  const Orders = () => {
+    const [expanded, setExpanded] = useState({});
+    const toggle = id => setExpanded(e=>({...e,[id]:!e[id]}));
+    return (
+      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+        <Btn full onClick={()=>openOrder()}>＋ Нова заявка</Btn>
+        {orders.length===0&&<div style={{ ...card,padding:50,textAlign:"center",color:"#8888a0" }}>📋 Няма заявки</div>}
+        {[...orders].sort((a,b)=>b.id-a.id).map(o=>{
+          const store=stores.find(s=>s.id===o.storeId);
+          const isDone=o.status==="done";
+          const isOpen=isDone?!!expanded[o.id]:true;
+          return (
+            <div key={o.id} style={{ ...card,padding:"12px 14px" }}>
+              <div onClick={isDone?()=>toggle(o.id):undefined}
+                style={{ display:"flex",alignItems:"center",gap:8,background:isDone?"rgba(78,205,196,0.08)":"rgba(240,192,64,0.10)",border:`1px solid ${isDone?"rgba(78,205,196,0.22)":"rgba(240,192,64,0.3)"}`,borderRadius:10,padding:"9px 12px",cursor:isDone?"pointer":"default",marginBottom:isOpen?10:0 }}>
+                <span style={{ fontSize:"1.2rem" }}>🏪</span>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",color:isDone?"#4ecdc4":"#f0c040",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{store?.name}</div>
+                  <div style={{ fontSize:"0.67rem",color:"#8888a0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>📍 {store?.address}</div>
                 </div>
-              ); })}
-            </div>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-              <span style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040" }}>{fmt(oval(o))}</span>
-              <div style={{ display:"flex",gap:7 }}>
-                {o.status==="pending"&&<Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}
-                <Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn>
+                <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3 }}>
+                  <Badge t={isDone?"done":"pending"}>{isDone?"Доставена":"Чакаща"}</Badge>
+                  <span style={{ fontSize:"0.63rem",color:"#8888a0" }}>#{o.id} · {o.date}</span>
+                </div>
+                {isDone&&<span style={{ color:"#8888a0",fontSize:"0.72rem",marginLeft:4,display:"inline-block",transition:"transform 0.2s",transform:isOpen?"rotate(180deg)":"rotate(0deg)" }}>▼</span>}
               </div>
+              {isOpen&&<>
+                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:10 }}>
+                  {o.items.map(item=>{ const p=products.find(x=>x.id===item.pid); if(!p)return null; return (
+                    <div key={item.pid} style={{ display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"8px 10px" }}>
+                      <Thumb p={p} size={46} />
+                      <div style={{ flex:1,minWidth:0 }}><div style={{ fontSize:"0.84rem",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p.name}</div><div style={{ fontSize:"0.67rem",color:"#8888a0" }}>{fmt(p.sellPrice*item.qty)}</div></div>
+                      <div style={{ fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.35rem",color:"#f0c040" }}>×{item.qty}</div>
+                    </div>
+                  ); })}
+                </div>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                  <span style={{ fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040" }}>{fmt(oval(o))}</span>
+                  <div style={{ display:"flex",gap:7 }}>
+                    {!isDone&&<Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}
+                    <Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn>
+                  </div>
+                </div>
+              </>}
+              {!isOpen&&<div style={{ display:"flex",justifyContent:"flex-end",marginTop:8 }}><Btn v="del" sm onClick={()=>deleteOrder(o.id)}>✕</Btn></div>}
             </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+          );
+        })}
+      </div>
+    );
+  };
 
   // ── STORES ────────────────────────────────────────────────
   const Stores = () => (
