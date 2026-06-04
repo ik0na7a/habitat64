@@ -15,28 +15,39 @@ async function binLoad() {
   return (await res.json()).record;
 }
 
-// Умно сливане — НЕ презаписва, а добавя новото към вече съществуващото
+// Умно сливане с tombstones — изтритите остават изтрити след merge
 async function binMergeSave(localData) {
   let remote = null;
   try { remote = await binLoad(); } catch(e) {}
 
   let merged = localData;
   if (remote && remote.products !== undefined) {
-    // Слива по ID — ако и двете устройства имат един продукт, локалното печели
-    const mergeById = (local, rem) => {
+    // Слива tombstone списъците (union) — изтриването се разпространява
+    const deleted = {
+      products: Array.from(new Set([...(localData.deleted?.products||[]), ...(remote.deleted?.products||[])])),
+      stores:   Array.from(new Set([...(localData.deleted?.stores||[]),   ...(remote.deleted?.stores||[])])),
+      orders:   Array.from(new Set([...(localData.deleted?.orders||[]),   ...(remote.deleted?.orders||[])])),
+    };
+
+    // Слива по ID, после филтрира изтритите
+    const mergeById = (local, rem, deletedIds) => {
       const map = {};
       (rem  ||[]).forEach(x => map[x.id] = x);
-      (local||[]).forEach(x => map[x.id] = x); // локалното презаписва
-      return Object.values(map).sort((a,b)=>a.id-b.id);
+      (local||[]).forEach(x => map[x.id] = x); // локалното печели при конфликт
+      return Object.values(map)
+        .filter(x => !deletedIds.includes(x.id)) // изключи изтритите
+        .sort((a,b)=>a.id-b.id);
     };
+
     merged = {
-      products: mergeById(localData.products, remote.products),
-      stores:   mergeById(localData.stores,   remote.stores),
-      orders:   mergeById(localData.orders,   remote.orders),
+      products: mergeById(localData.products, remote.products, deleted.products),
+      stores:   mergeById(localData.stores,   remote.stores,   deleted.stores),
+      orders:   mergeById(localData.orders,   remote.orders,   deleted.orders),
       nextId:   Math.max(localData.nextId||0, remote.nextId||0),
       catOrder: localData.catOrder || remote.catOrder || [],
+      deleted,
     };
-    lsSave(merged); // запази слятото локално
+    lsSave(merged);
   }
 
   const res = await fetch(BIN_URL, { method:"PUT", headers:HEADERS, body:JSON.stringify(merged) });
@@ -214,6 +225,7 @@ export default function App() {
   const [nextId,      setNextId]      = useState(1001);
   // category order — масив от имена в желания ред
   const [catOrder,    setCatOrder]    = useState([]);
+  const [deleted,     setDeleted]     = useState({ products:[], stores:[], orders:[] });
 
   // inventory UI
   const [filterCat,   setFilterCat]  = useState("Всички");
@@ -242,11 +254,13 @@ export default function App() {
 
   // ── LOAD ─────────────────────────────────────────────────
   function applyData(d) {
-    setProducts(d.products  || []);
-    setStores(d.stores      || []);
-    setOrders(d.orders      || []);
-    setNextId(d.nextId      || 1001);
-    setCatOrder(d.catOrder  || []);
+    const del = d.deleted || { products:[], stores:[], orders:[] };
+    setProducts((d.products||[]).filter(x=>!del.products.includes(x.id)));
+    setStores(  (d.stores  ||[]).filter(x=>!del.stores.includes(x.id)));
+    setOrders(  (d.orders  ||[]).filter(x=>!del.orders.includes(x.id)));
+    setNextId(d.nextId    || 1001);
+    setCatOrder(d.catOrder|| []);
+    setDeleted(del);
   }
 
   useEffect(() => {
@@ -269,7 +283,7 @@ export default function App() {
   // ── SAVE ─────────────────────────────────────────────────
   const binTimer = useRef(null);
   const persist  = useCallback((p, s, o, nid, co) => {
-    const data = { products:p, stores:s, orders:o, nextId:nid, catOrder:co };
+    const data = { products:p, stores:s, orders:o, nextId:nid, catOrder:co, deleted };
     lsSave(data); // ВЕДНАГА в localStorage
     setSyncStatus("saving");
     clearTimeout(binTimer.current);
@@ -328,7 +342,12 @@ export default function App() {
     const newP = products.map(p=>p.id===mEdit?{ ...p,name:eF.name||p.name,sku:eF.sku||p.sku,qty:parseInt(eF.qty)||0,buyPrice:parseFloat(eF.buy)||0,sellPrice:parseFloat(eF.sell)||0,minLevel:parseInt(eF.min)||10,image:eF.img,category:eF.cat }:p);
     setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMEdit(null);
   };
-  const deleteProd = id => { const newP=products.filter(x=>x.id!==id); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); };
+  const deleteProd = id => {
+    const newP = products.filter(x=>x.id!==id);
+    const newDel = { ...deleted, products:[...deleted.products, id] };
+    setProducts(newP); setDeleted(newDel);
+    persist(newP,stores,orders,nextId,catOrder);
+  };
 
   const addStore = () => {
     if (!sF.name.trim()) return;
@@ -342,7 +361,12 @@ export default function App() {
     const newS = stores.map(s=>s.id===mStoreEdit?{ ...s,name:eSF.name||s.name,address:eSF.addr,contact:eSF.contact,phone:eSF.phone,bulstat:eSF.bulstat }:s);
     setStores(newS); persist(products,newS,orders,nextId,catOrder); setMStoreEdit(null);
   };
-  const deleteStore = id => { const newS=stores.filter(x=>x.id!==id); setStores(newS); persist(products,newS,orders,nextId,catOrder); };
+  const deleteStore = id => {
+    const newS = stores.filter(x=>x.id!==id);
+    const newDel = { ...deleted, stores:[...deleted.stores, id] };
+    setStores(newS); setDeleted(newDel);
+    persist(products,newS,orders,nextId,catOrder);
+  };
 
   const submitOrder = () => {
     const items = products.filter(p=>oQtys[p.id]>0).map(p=>({ pid:p.id,qty:oQtys[p.id] }));
@@ -356,7 +380,12 @@ export default function App() {
   };
   const applyRestock = () => { const newP=products.map(p=>({ ...p,qty:p.qty+(rQtys[p.id]||0) })); setProducts(newP); persist(newP,stores,orders,nextId,catOrder); setMRestock(false); };
   const deliverOrder = id => { const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
-  const deleteOrder  = id => { const newO=orders.filter(x=>x.id!==id); setOrders(newO); persist(products,stores,newO,nextId,catOrder); };
+  const deleteOrder  = id => {
+    const newO = orders.filter(x=>x.id!==id);
+    const newDel = { ...deleted, orders:[...deleted.orders, id] };
+    setOrders(newO); setDeleted(newDel);
+    persist(products,stores,newO,nextId,catOrder);
+  };
 
   // ── LOADING ───────────────────────────────────────────────
   if (!ready) return (
