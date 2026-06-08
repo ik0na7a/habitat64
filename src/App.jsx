@@ -166,22 +166,87 @@ export default function App() {
   }
 
   // ── LOAD ON MOUNT ────────────────────────────────────────
+  // ── SYNC FROM REMOTE (manual + on load) ─────────────────
+  const doSync = async () => {
+    setSyncStatus("syncing");
+    try {
+      const remote = await binGet();
+      if (remote?.products !== undefined) {
+        // Remote е истината — вземаме го директно
+        // Само добавяме локални неща които remote няма (офлайн промени)
+        const local = lsGet();
+        if (local) {
+          // Запазваме tombstones от local (изтривания направени офлайн)
+          const del = {
+            products: Array.from(new Set([...(local.deleted?.products||[]),(remote.deleted?.products||[])])),
+            stores:   Array.from(new Set([...(local.deleted?.stores||[]),  ...(remote.deleted?.stores||[])])),
+            orders:   Array.from(new Set([...(local.deleted?.orders||[]),  ...(remote.deleted?.orders||[])])),
+          };
+          // Remote wins за всичко, после добавяме local-only items
+          const addLocalOnly = (rem, loc, tombstones) => {
+            const remIds = new Set((rem||[]).map(x=>x.id));
+            const localOnly = (loc||[]).filter(x=>!remIds.has(x.id)&&!tombstones.includes(x.id));
+            return [...(rem||[]), ...localOnly].sort((a,b)=>a.id-b.id);
+          };
+          const synced = {
+            products: addLocalOnly(remote.products, local.products, del.products),
+            stores:   addLocalOnly(remote.stores,   local.stores,   del.stores),
+            orders:   addLocalOnly(remote.orders,   local.orders,   del.orders),
+            nextId:   Math.max(remote.nextId||0, local.nextId||0),
+            catOrder: remote.catOrder || local.catOrder || [],
+            deleted:  del,
+          };
+          applyData(synced); lsSet(synced);
+        } else {
+          applyData(remote); lsSet(remote);
+        }
+      }
+      setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
+    } catch(e) {
+      setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),3000);
+    }
+  };
+
   useEffect(()=>{
     (async()=>{
       const local = lsGet();
-      if(local){ applyData(local); setReady(true); setSyncStatus("syncing"); }
-      try {
-        const remote = await binGet();
-        if(remote?.products!==undefined){
-          const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
-          applyData(merged); lsSet(merged);
-        }
-        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
-      } catch(e){
-        setSyncStatus(local?"saved":"error"); setTimeout(()=>setSyncStatus(null),3000);
-      } finally { setReady(true); }
+      if(local){ applyData(local); setReady(true); }
+      await doSync();
+      setReady(true);
     })();
   },[]);
+
+  // ── AUTO-SYNC: проверява JSONBin на всеки 30 сек ────────
+  const pollRef = useRef(null);
+  const isSaving = useRef(false); // не презаписвай докато се записва
+
+  useEffect(() => {
+    if (!ready) return;
+    pollRef.current = setInterval(async () => {
+      if (isSaving.current) return; // изчакай да свърши записването
+      try {
+        const remote = await binGet();
+        if (!remote?.products) return;
+        const local = lsGet();
+        // Провери дали remote е по-ново (има нови неща)
+        const remoteNid  = remote.nextId || 0;
+        const localNid   = local?.nextId || 0;
+        const remoteTotal = (remote.products?.length||0) + (remote.orders?.length||0) + (remote.stores?.length||0);
+        const remoteDelTotal = (remote.deleted?.products?.length||0) + (remote.deleted?.orders?.length||0) + (remote.deleted?.stores?.length||0);
+        const localTotal  = (local?.products?.length||0)  + (local?.orders?.length||0)  + (local?.stores?.length||0);
+        const localDelTotal  = (local?.deleted?.products?.length||0)  + (local?.deleted?.orders?.length||0)  + (local?.deleted?.stores?.length||0);
+        const hasNewData = remoteNid > localNid || remoteTotal !== localTotal || remoteDelTotal !== localDelTotal;
+        if (hasNewData) {
+          const merged = mergeData(local || {products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
+          applyData(merged);
+          lsSet(merged);
+          setSyncStatus("saved");
+          setTimeout(() => setSyncStatus(null), 2000);
+        }
+      } catch(e) { /* тихо — не показвай грешка при poll */ }
+    }, 30000); // на всеки 30 секунди
+    return () => clearInterval(pollRef.current);
+  }, [ready]);
 
   // ── PERSIST ─────────────────────────────────────────────
   // ВАЖНО: приема del като аргумент — не ползва stale closure!
