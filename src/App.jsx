@@ -7,8 +7,8 @@ const SB_HDR = { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content
 
 async function sbGet() {
   const r = await fetch(
-    `${SB_URL}/rest/v1/appdata?id=eq.main&select=data&t=${Date.now()}`,
-    { headers: { ...SB_HDR, "Accept": "application/json" } }
+    `${SB_URL}/rest/v1/appdata?id=eq.main&select=data`,
+    { headers: { ...SB_HDR, "Accept": "application/json" }, cache: "no-store" }
   );
   if (!r.ok) throw new Error(r.status);
   const rows = await r.json();
