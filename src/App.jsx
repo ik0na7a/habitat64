@@ -129,7 +129,7 @@ export default function App() {
 
   // ── APPLY DATA ────────────────────────────────────────────
   function applyData(d) {
-    if (!d) return;
+    if (!d || (!d.products?.length && !d.stores?.length && !d.orders?.length && !d.nextId)) return;
     const del = { ...EMPTY_DEL, ...(d.deleted||{}) };
     // flatten deleted arrays (fix legacy nested arrays bug)
     const flat = arr => [...new Set((arr||[]).flat(Infinity).filter(x=>typeof x==="number"))];
@@ -152,7 +152,7 @@ export default function App() {
         applyData(data);
         setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),1500);
       } catch(e){
-        setSyncStatus("error");
+        setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),5000);
       } finally {
         setReady(true);
       }
