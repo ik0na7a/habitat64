@@ -10,18 +10,23 @@ async function sbGet() {
     `${SB_URL}/rest/v1/appdata?id=eq.main&select=data`,
     { headers: { ...SB_HDR, "Accept": "application/json" }, cache: "no-store" }
   );
-  if (!r.ok) throw new Error(r.status);
+  if (!r.ok) { const t = await r.text(); throw new Error(`GET ${r.status}: ${t}`); }
   const rows = await r.json();
-  return rows[0]?.data || null;
+  const d = rows[0]?.data || null;
+  console.log("sbGet →", d ? `nextId=${d.nextId} products=${d.products?.length}` : "null");
+  return d;
 }
 
 async function sbPut(data) {
-  const r = await fetch(`${SB_URL}/rest/v1/appdata?id=eq.main`, {
-    method: "PATCH",
-    headers: { ...SB_HDR, "Prefer": "return=minimal" },
-    body: JSON.stringify({ data }),
+  console.log("sbPut →", `nextId=${data.nextId} products=${data.products?.length}`);
+  // POST upsert — по-надежден от PATCH
+  const r = await fetch(`${SB_URL}/rest/v1/appdata`, {
+    method: "POST",
+    headers: { ...SB_HDR, "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ id: "main", data }),
   });
-  if (!r.ok) throw new Error(r.status);
+  if (!r.ok) { const t = await r.text(); throw new Error(`PUT ${r.status}: ${t}`); }
+  console.log("sbPut ✓ status", r.status);
 }
 
 // ── CONSTANTS ─────────────────────────────────────────────────
