@@ -180,43 +180,76 @@ export default function App() {
     })();
   },[]);
 
-  // ── AUTO-SYNC: polling на 30 сек (Supabase = без лимит) ──
+  // ── REALTIME + POLLING SYNC ───────────────────────────────
+  const syncFromRemote = useCallback(async () => {
+    try {
+      const remote = await sbGet();
+      if (!remote?.products) return;
+      const local = lsGet();
+      const remNid   = remote.nextId||0;
+      const locNid   = local?.nextId||0;
+      const remItems = (remote.products?.length||0)+(remote.orders?.length||0)+(remote.deleted?.products?.length||0)+(remote.deleted?.orders?.length||0);
+      const locItems = (local?.products?.length||0) +(local?.orders?.length||0) +(local?.deleted?.products?.length||0) +(local?.deleted?.orders?.length||0);
+      if (remNid > locNid || remItems !== locItems) {
+        const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
+        applyData(merged); lsSet(merged);
+        setSyncStatus("synced"); setTimeout(()=>setSyncStatus(null),2000);
+      }
+    } catch {}
+  }, []);
+
   useEffect(()=>{
-    if(!ready)return;
-    const iv = setInterval(async()=>{
+    if (!ready) return;
+
+    // 1. Supabase Realtime — WebSocket за моментален sync
+    const ws = new WebSocket(
+      `wss://hsrspmzkripcrhfzaioe.supabase.co/realtime/v1/websocket?apikey=${SB_KEY}&vsn=1.0.0`
+    );
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        topic: "realtime:public:appdata",
+        event:  "phx_join",
+        payload: {
+          config: {
+            postgres_changes: [{ event: "UPDATE", schema: "public", table: "appdata" }]
+          }
+        },
+        ref: "1"
+      }));
+    };
+    ws.onmessage = async (msg) => {
       try {
-        const remote = await sbGet();
-        if(!remote?.products)return;
-        const local = lsGet();
-        const remNid  = remote.nextId||0;
-        const locNid  = local?.nextId||0;
-        const remTotal = (remote.products?.length||0)+(remote.orders?.length||0)+(remote.stores?.length||0)+(remote.deleted?.products?.length||0)+(remote.deleted?.orders?.length||0);
-        const locTotal = (local?.products?.length||0) +(local?.orders?.length||0) +(local?.stores?.length||0) +(local?.deleted?.products?.length||0) +(local?.deleted?.orders?.length||0);
-        if(remNid>locNid || remTotal!==locTotal){
-          const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
-          applyData(merged); lsSet(merged);
-          setSyncStatus("synced"); setTimeout(()=>setSyncStatus(null),2500);
+        const d = JSON.parse(msg.data);
+        // При UPDATE на таблицата — зареди новите данни
+        if (d.event === "postgres_changes" || d.payload?.type === "UPDATE") {
+          await syncFromRemote();
         }
-      } catch{}
-    }, 30000);
-    return ()=>clearInterval(iv);
-  },[ready]);
+      } catch {}
+    };
+    // Heartbeat за да не се затвори връзката
+    const hb = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
+      }
+    }, 20000);
+
+    // 2. Polling на 5 сек като резерва ако WebSocket пропусне нещо
+    const iv = setInterval(syncFromRemote, 15000); // 15 сек резерва — Realtime поема основния sync
+
+    return () => { clearInterval(hb); clearInterval(iv); ws.close(); };
+  }, [ready, syncFromRemote]);
 
   // ── PERSIST ───────────────────────────────────────────────
-  const saveTimer = useRef(null);
-  const persist = useCallback((p,s,o,nid,co,del)=>{
+  const persist = useCallback(async (p,s,o,nid,co,del)=>{
     const data={products:p,stores:s,orders:o,nextId:nid,catOrder:co,deleted:del};
-    lsSet(data);
+    lsSet(data); // веднага локално
     setSyncStatus("saving");
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async()=>{
-      try {
-        await sbPut(data);
-        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2500);
-      } catch(e){
-        setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000);
-      }
-    }, 500);
+    try {
+      await sbPut(data); // веднага в Supabase — без дебаунс
+      setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2500);
+    } catch(e){
+      setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000);
+    }
   },[]);
 
   // ── HELPERS ───────────────────────────────────────────────
