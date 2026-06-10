@@ -5,51 +5,29 @@ const SB_URL = "https://hsrspmzkripcrhfzaioe.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhzcnNwbXprcmlwY3JoZnphaW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTExOTMsImV4cCI6MjA5NjY2NzE5M30.QbXm2oxKMLB5Tq9YVM6O5FjZQrQc9fMsQtUL_v0yEPI";
 const SB_HDR = { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
-const sbGet = async () => {
-  const r = await fetch(`${SB_URL}/rest/v1/appdata?id=eq.main&select=data`, { headers: SB_HDR });
+async function sbGet() {
+  const r = await fetch(
+    `${SB_URL}/rest/v1/appdata?id=eq.main&select=data&_=${Date.now()}`,
+    { headers: SB_HDR, cache: "no-store" }
+  );
   if (!r.ok) throw new Error(r.status);
   const rows = await r.json();
   return rows[0]?.data || null;
-};
-const sbPut = async data => {
+}
+
+async function sbPut(data) {
   const r = await fetch(`${SB_URL}/rest/v1/appdata?id=eq.main`, {
-    method: "PATCH", headers: { ...SB_HDR, "Prefer": "return=minimal" },
-    body: JSON.stringify({ data })
+    method: "PATCH",
+    headers: { ...SB_HDR, "Prefer": "return=minimal" },
+    body: JSON.stringify({ data }),
   });
   if (!r.ok) throw new Error(r.status);
-};
-
-// ── LOCAL STORAGE ─────────────────────────────────────────────
-const LS_KEY = "habitat64_v3";
-const lsGet = () => { try { const d=localStorage.getItem(LS_KEY); return d?JSON.parse(d):null; } catch{return null;} };
-const lsSet = d => { try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch{} };
-
-// ── MERGE ─────────────────────────────────────────────────────
-const EMPTY_DEL = { products:[], stores:[], orders:[] };
-function mergeData(local, remote) {
-  if (!remote?.products) return local;
-  const delP = new Set([...(local.deleted?.products||[]),...(remote.deleted?.products||[])]);
-  const delS = new Set([...(local.deleted?.stores||[]),  ...(remote.deleted?.stores||[])]);
-  const delO = new Set([...(local.deleted?.orders||[]),  ...(remote.deleted?.orders||[])]);
-  const byId = (a, b, del) => {
-    const m={};
-    (b||[]).forEach(x=>m[x.id]=x);
-    (a||[]).forEach(x=>m[x.id]=x);
-    return Object.values(m).filter(x=>!del.has(x.id)).sort((a,b)=>a.id-b.id);
-  };
-  return {
-    products: byId(local.products, remote.products, delP),
-    stores:   byId(local.stores,   remote.stores,   delS),
-    orders:   byId(local.orders,   remote.orders,   delO),
-    nextId:   Math.max(local.nextId||0, remote.nextId||0),
-    catOrder: local.catOrder || remote.catOrder || [],
-    deleted:  { products:[...delP], stores:[...delS], orders:[...delO] },
-  };
 }
 
 // ── CONSTANTS ─────────────────────────────────────────────────
 const EMOJIS = ["🍬","🥛","💧","🫙","🍚","🧃","🥤","🍫","🥚","🧀","🌽","🍎","🧴","🫧","🧹"];
 const fmt = n => `${(+n||0).toFixed(2)} €`;
+const EMPTY_DEL = { products:[], stores:[], orders:[] };
 
 // ── UI COMPONENTS ─────────────────────────────────────────────
 function Thumb({ p, size=52 }) {
@@ -93,7 +71,6 @@ function StatusBar({status}){
     saved:   {bg:"rgba(74,222,128,0.95)",  color:"#0f0f14", text:"✓ Запазено"},
     synced:  {bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Обновено"},
     error:   {bg:"rgba(248,113,113,0.95)", color:"#fff",    text:"⚠ Проблем — провери връзката"},
-    syncing: {bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Синхронизира..."},
   };
   if(!status||!cfg[status])return null;
   const c=cfg[status];
@@ -118,7 +95,7 @@ function HoldBtn({onDelete, label="✕ Изтрий", full}) {
 // ══════════════════════════════════════════════════════════════
 export default function App() {
   const [ready,      setReady]      = useState(false);
-  const [syncStatus, setSyncStatus] = useState("syncing");
+  const [syncStatus, setSyncStatus] = useState(null);
   const [page,       setPage]       = useState("dashboard");
   const [products,   setProducts]   = useState([]);
   const [stores,     setStores]     = useState([]);
@@ -152,109 +129,78 @@ export default function App() {
 
   // ── APPLY DATA ────────────────────────────────────────────
   function applyData(d) {
-    const del = d.deleted || EMPTY_DEL;
-    const delP=new Set(del.products||[]), delS=new Set(del.stores||[]), delO=new Set(del.orders||[]);
+    if (!d) return;
+    const del = { ...EMPTY_DEL, ...(d.deleted||{}) };
+    // flatten deleted arrays (fix legacy nested arrays bug)
+    const flat = arr => [...new Set((arr||[]).flat(Infinity).filter(x=>typeof x==="number"))];
+    const delP = new Set(flat(del.products));
+    const delS = new Set(flat(del.stores));
+    const delO = new Set(flat(del.orders));
     setProducts((d.products||[]).filter(x=>!delP.has(x.id)));
     setStores(  (d.stores  ||[]).filter(x=>!delS.has(x.id)));
     setOrders(  (d.orders  ||[]).filter(x=>!delO.has(x.id)));
-    setNextId(d.nextId    ||1001);
+    setNextId(d.nextId||1001);
     setCatOrder(d.catOrder||[]);
-    setDeleted(del);
+    setDeleted({ products:[...delP], stores:[...delS], orders:[...delO] });
   }
 
-  // ── LOAD ──────────────────────────────────────────────────
+  // ── LOAD — точно като оригинала с JSONBin ────────────────
   useEffect(()=>{
     (async()=>{
-      const local=lsGet();
-      if(local){ applyData(local); setReady(true); setSyncStatus("syncing"); }
       try {
-        const remote = await sbGet();
-        if(remote?.products!==undefined){
-          const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
-          applyData(merged); lsSet(merged);
-        }
-        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
+        const data = await sbGet();
+        applyData(data);
+        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),1500);
       } catch(e){
-        setSyncStatus(local?"saved":"error"); setTimeout(()=>setSyncStatus(null),3000);
-      } finally { setReady(true); }
+        setSyncStatus("error");
+      } finally {
+        setReady(true);
+      }
     })();
   },[]);
 
-  // ── REALTIME + POLLING SYNC ───────────────────────────────
-  const syncFromRemote = useCallback(async () => {
-    try {
-      const remote = await sbGet();
-      if (!remote?.products) return;
-      const local = lsGet();
-      const remNid   = remote.nextId||0;
-      const locNid   = local?.nextId||0;
-      const remItems = (remote.products?.length||0)+(remote.orders?.length||0)+(remote.deleted?.products?.length||0)+(remote.deleted?.orders?.length||0);
-      const locItems = (local?.products?.length||0) +(local?.orders?.length||0) +(local?.deleted?.products?.length||0) +(local?.deleted?.orders?.length||0);
-      if (remNid > locNid || remItems !== locItems) {
-        const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
-        applyData(merged); lsSet(merged);
-        setSyncStatus("synced"); setTimeout(()=>setSyncStatus(null),2000);
-      }
-    } catch {}
-  }, []);
+  // ── PERSIST — точно като оригинала: дебаунс 800ms ────────
+  const saveTimer = useRef(null);
+  const lastSaved = useRef(0); // timestamp на последния наш запис
 
-  useEffect(()=>{
-    if (!ready) return;
-
-    // 1. Supabase Realtime — WebSocket за моментален sync
-    const ws = new WebSocket(
-      `wss://hsrspmzkripcrhfzaioe.supabase.co/realtime/v1/websocket?apikey=${SB_KEY}&vsn=1.0.0`
-    );
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        topic: "realtime:public:appdata",
-        event:  "phx_join",
-        payload: {
-          config: {
-            postgres_changes: [{ event: "UPDATE", schema: "public", table: "appdata" }]
-          }
-        },
-        ref: "1"
-      }));
-    };
-    ws.onmessage = async (msg) => {
-      try {
-        const d = JSON.parse(msg.data);
-        // При UPDATE на таблицата — зареди новите данни
-        if (d.event === "postgres_changes" || d.payload?.type === "UPDATE") {
-          await syncFromRemote();
-        }
-      } catch {}
-    };
-    // Heartbeat за да не се затвори връзката
-    const hb = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
-      }
-    }, 20000);
-
-    // 2. Polling на 5 сек като резерва ако WebSocket пропусне нещо
-    const iv = setInterval(syncFromRemote, 15000); // 15 сек резерва — Realtime поема основния sync
-
-    return () => { clearInterval(hb); clearInterval(iv); ws.close(); };
-  }, [ready, syncFromRemote]);
-
-  // ── PERSIST ───────────────────────────────────────────────
-  const persist = useCallback(async (p,s,o,nid,co,del)=>{
-    const data={products:p,stores:s,orders:o,nextId:nid,catOrder:co,deleted:del};
-    lsSet(data); // веднага локално
+  const persist = useCallback((p,s,o,nid,co,del)=>{
+    const ts = Date.now();
+    const data = { products:p, stores:s, orders:o, nextId:nid, catOrder:co, deleted:del, ts };
     setSyncStatus("saving");
-    try {
-      await sbPut(data); // веднага в Supabase — без дебаунс
-      setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2500);
-    } catch(e){
-      setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000);
-    }
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async()=>{
+      try {
+        await sbPut(data);
+        lastSaved.current = ts;
+        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2500);
+      } catch(e){
+        setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000);
+      }
+    }, 800);
   },[]);
 
+  // ── POLLING 30 сек — само ако другото устройство е запазило нещо ново
+  useEffect(()=>{
+    if(!ready)return;
+    const iv = setInterval(async()=>{
+      try {
+        const remote = await sbGet();
+        if(!remote||!remote.ts)return;
+        // Приложи само ако remote е по-ново от нашия последен запис
+        if(remote.ts > lastSaved.current){
+          lastSaved.current = remote.ts;
+          applyData(remote);
+          setSyncStatus("synced"); setTimeout(()=>setSyncStatus(null),2500);
+        }
+      } catch{}
+    }, 30000);
+    return ()=>clearInterval(iv);
+  },[ready]);
+
   // ── HELPERS ───────────────────────────────────────────────
-  const oval   = o=>o.items.reduce((s,i)=>{const p=products.find(x=>x.id===i.pid);return s+(p?p.sellPrice*i.qty:0);},0);
+  const oval = o=>o.items.reduce((s,i)=>{const p=products.find(x=>x.id===i.pid);return s+(p?p.sellPrice*i.qty:0);},0);
   const ototal = products.reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
+
   const openOrder = sid=>{const q={};products.forEach(p=>q[p.id]=0);setOQtys(q);setOSid(sid||stores[0]?.id||"");setODate(new Date().toISOString().split("T")[0]);setMOrder(true);};
 
   const getOrderedCats = useCallback(()=>{
@@ -459,7 +405,6 @@ export default function App() {
             <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.88rem"}}>↕ Ред на категории</div>
             <button onClick={()=>setShowCatEdit(false)} style={{background:"none",border:"none",color:"#8888a0",cursor:"pointer",fontSize:"1.1rem"}}>✕</button>
           </div>
-          <div style={{fontSize:"0.70rem",color:"#8888a0",marginBottom:10}}>Натисни ↑ ↓ — първите излизат вляво</div>
           {orderedCats.map((cat,idx)=>(
             <div key={cat} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"10px 14px",marginBottom:7}}>
               <div style={{fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1rem",color:"#f0c040",minWidth:22}}>{idx+1}</div>
