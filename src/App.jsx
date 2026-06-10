@@ -1,28 +1,40 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
-// ── CONFIG ───────────────────────────────────────────────────
-const BIN_ID  = "6a0b76656610dd3ae867ec11";
-const BIN_KEY = "$2a$10$BQmK0hFCCUIC/YcQqnsAM.aMYK.Eacie03ylZ/N6DLuq1pdtsbfsO";
-const BIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-const HDR     = { "Content-Type": "application/json", "X-Access-Key": BIN_KEY };
-const LS_KEY  = "habitat64_v2";
+// ── SUPABASE ─────────────────────────────────────────────────
+const SB_URL = "https://hsrspmzkripcrhfzaioe.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhzcnNwbXprcmlwY3JoZnphaW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTExOTMsImV4cCI6MjA5NjY2NzE5M30.QbXm2oxKMLB5Tq9YVM6O5FjZQrQc9fMsQtUL_v0yEPI";
+const SB_HDR = { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
-// ── STORAGE ──────────────────────────────────────────────────
-const lsGet = ()    => { try { const d=localStorage.getItem(LS_KEY); return d?JSON.parse(d):null; } catch{return null;} };
-const lsSet = data  => { try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch{} };
-const binGet = async() => { const r=await fetch(`${BIN_URL}/latest`,{headers:HDR}); if(!r.ok)throw new Error(r.status); return (await r.json()).record; };
-const binPut = async data => { const r=await fetch(BIN_URL,{method:"PUT",headers:HDR,body:JSON.stringify(data)}); if(!r.ok)throw new Error(r.status); };
+const sbGet = async () => {
+  const r = await fetch(`${SB_URL}/rest/v1/appdata?id=eq.main&select=data`, { headers: SB_HDR });
+  if (!r.ok) throw new Error(r.status);
+  const rows = await r.json();
+  return rows[0]?.data || null;
+};
+const sbPut = async data => {
+  const r = await fetch(`${SB_URL}/rest/v1/appdata?id=eq.main`, {
+    method: "PATCH", headers: { ...SB_HDR, "Prefer": "return=minimal" },
+    body: JSON.stringify({ data })
+  });
+  if (!r.ok) throw new Error(r.status);
+};
 
-// Smart merge: union of items by id, deleted list wins
+// ── LOCAL STORAGE ─────────────────────────────────────────────
+const LS_KEY = "habitat64_v3";
+const lsGet = () => { try { const d=localStorage.getItem(LS_KEY); return d?JSON.parse(d):null; } catch{return null;} };
+const lsSet = d => { try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch{} };
+
+// ── MERGE ─────────────────────────────────────────────────────
+const EMPTY_DEL = { products:[], stores:[], orders:[] };
 function mergeData(local, remote) {
   if (!remote?.products) return local;
   const delP = new Set([...(local.deleted?.products||[]),...(remote.deleted?.products||[])]);
   const delS = new Set([...(local.deleted?.stores||[]),  ...(remote.deleted?.stores||[])]);
   const delO = new Set([...(local.deleted?.orders||[]),  ...(remote.deleted?.orders||[])]);
-  const byId = (a,b,del) => {
+  const byId = (a, b, del) => {
     const m={};
     (b||[]).forEach(x=>m[x.id]=x);
-    (a||[]).forEach(x=>m[x.id]=x); // local wins
+    (a||[]).forEach(x=>m[x.id]=x);
     return Object.values(m).filter(x=>!del.has(x.id)).sort((a,b)=>a.id-b.id);
   };
   return {
@@ -35,15 +47,14 @@ function mergeData(local, remote) {
   };
 }
 
-// ── CONSTANTS ────────────────────────────────────────────────
+// ── CONSTANTS ─────────────────────────────────────────────────
 const EMOJIS = ["🍬","🥛","💧","🫙","🍚","🧃","🥤","🍫","🥚","🧀","🌽","🍎","🧴","🫧","🧹"];
-const fmt    = n => `${(+n||0).toFixed(2)} €`;
-const EMPTY_DEL = { products:[], stores:[], orders:[] };
+const fmt = n => `${(+n||0).toFixed(2)} €`;
 
-// ── COMPONENTS ───────────────────────────────────────────────
+// ── UI COMPONENTS ─────────────────────────────────────────────
 function Thumb({ p, size=52 }) {
   const em = EMOJIS[(p.id-1)%EMOJIS.length]||"📦";
-  const [err,setErr]=useState(false);
+  const [err,setErr] = useState(false);
   if (p.image&&!err) return <img src={p.image} alt={p.name} onError={()=>setErr(true)} style={{width:size,height:size,borderRadius:10,objectFit:"cover",flexShrink:0}} />;
   return <div style={{width:size,height:size,borderRadius:10,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.46,flexShrink:0}}>{em}</div>;
 }
@@ -77,32 +88,25 @@ function Modal({open,onClose,title,children,footer}){
 }
 
 function StatusBar({status}){
-  const cfg={saving:{bg:"rgba(240,192,64,0.95)",color:"#0f0f14",text:"💾 Запазва се..."},saved:{bg:"rgba(74,222,128,0.95)",color:"#0f0f14",text:"✓ Запазено"},error:{bg:"rgba(248,113,113,0.95)",color:"#fff",text:"⚠ Проблем — провери връзката"},syncing:{bg:"rgba(78,205,196,0.95)",color:"#0f0f14",text:"🔄 Синхронизира..."}};
+  const cfg={
+    saving:  {bg:"rgba(240,192,64,0.95)",  color:"#0f0f14", text:"💾 Запазва се..."},
+    saved:   {bg:"rgba(74,222,128,0.95)",  color:"#0f0f14", text:"✓ Запазено"},
+    synced:  {bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Обновено"},
+    error:   {bg:"rgba(248,113,113,0.95)", color:"#fff",    text:"⚠ Проблем — провери връзката"},
+    syncing: {bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Синхронизира..."},
+  };
   if(!status||!cfg[status])return null;
   const c=cfg[status];
   return <div style={{position:"fixed",top:58,left:"50%",transform:"translateX(-50%)",background:c.bg,borderRadius:20,padding:"6px 18px",fontSize:"0.78rem",color:c.color,zIndex:150,fontWeight:700,boxShadow:"0 2px 12px rgba(0,0,0,0.4)",whiteSpace:"nowrap"}}>{c.text}</div>;
 }
 
-// Hold-to-delete button
-function HoldBtn({ onDelete, label="✕ Изтрий", full }) {
-  const [pct, setPct] = useState(0);
-  const [active, setActive] = useState(false);
-  const iv = useRef(null);
-  const DURATION = 2000;
-
-  const start = e => {
-    e.stopPropagation();
-    setActive(true);
-    const t0 = Date.now();
-    iv.current = setInterval(() => {
-      const p = Math.min(100,(Date.now()-t0)/DURATION*100);
-      setPct(p);
-      if(p>=100){ clearInterval(iv.current); setActive(false); setPct(0); onDelete(); }
-    },30);
-  };
-  const cancel = e => { e&&e.stopPropagation(); clearInterval(iv.current); setActive(false); setPct(0); };
-
-  return (
+function HoldBtn({onDelete, label="✕ Изтрий", full}) {
+  const [pct,setPct]=useState(0);
+  const [active,setActive]=useState(false);
+  const iv=useRef(null);
+  const start=e=>{ e.stopPropagation(); setActive(true); const t0=Date.now(); iv.current=setInterval(()=>{ const p=Math.min(100,(Date.now()-t0)/2000*100); setPct(p); if(p>=100){clearInterval(iv.current);setActive(false);setPct(0);onDelete();} },30); };
+  const cancel=e=>{ e&&e.stopPropagation(); clearInterval(iv.current); setActive(false); setPct(0); };
+  return(
     <div onMouseDown={start} onMouseUp={cancel} onMouseLeave={cancel} onTouchStart={start} onTouchEnd={cancel} onTouchCancel={cancel}
       style={{position:"relative",overflow:"hidden",borderRadius:10,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",touchAction:"none",background:active?"rgba(248,113,113,0.25)":"rgba(248,113,113,0.15)",border:`1px solid ${active?"rgba(248,113,113,0.7)":"rgba(248,113,113,0.3)"}`,padding:"8px 14px",fontSize:"0.80rem",fontWeight:600,color:"#f87171",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:5,width:full?"100%":"auto"}}>
       {active&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pct}%`,background:"rgba(248,113,113,0.4)",pointerEvents:"none"}} />}
@@ -116,16 +120,13 @@ export default function App() {
   const [ready,      setReady]      = useState(false);
   const [syncStatus, setSyncStatus] = useState("syncing");
   const [page,       setPage]       = useState("dashboard");
+  const [products,   setProducts]   = useState([]);
+  const [stores,     setStores]     = useState([]);
+  const [orders,     setOrders]     = useState([]);
+  const [nextId,     setNextId]     = useState(1001);
+  const [catOrder,   setCatOrder]   = useState([]);
+  const [deleted,    setDeleted]    = useState(EMPTY_DEL);
 
-  // DATA
-  const [products,  setProducts]  = useState([]);
-  const [stores,    setStores]    = useState([]);
-  const [orders,    setOrders]    = useState([]);
-  const [nextId,    setNextId]    = useState(1001);
-  const [catOrder,  setCatOrder]  = useState([]);
-  const [deleted,   setDeleted]   = useState(EMPTY_DEL);
-
-  // MODALS
   const [mProd,      setMProd]      = useState(false);
   const [mStore,     setMStore]     = useState(false);
   const [mOrder,     setMOrder]     = useState(false);
@@ -133,15 +134,13 @@ export default function App() {
   const [mEdit,      setMEdit]      = useState(null);
   const [mStoreEdit, setMStoreEdit] = useState(null);
 
-  // INVENTORY UI
-  const [filterCat,   setFilterCat]   = useState("Всички");
-  const [sortMode,    setSortMode]     = useState("az");
-  const [showSort,    setShowSort]     = useState(false);
-  const [showCatEdit, setShowCatEdit]  = useState(false);
+  const [filterCat,   setFilterCat]  = useState("Всички");
+  const [sortMode,    setSortMode]   = useState("az");
+  const [showSort,    setShowSort]   = useState(false);
+  const [showCatEdit, setShowCatEdit]= useState(false);
 
-  // FORMS
-  const emP = {name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:"",cat:""};
-  const emS = {name:"",addr:"",contact:"",phone:"",bulstat:""};
+  const emP={name:"",sku:"",qty:"",buy:"",sell:"",min:"10",img:"",cat:""};
+  const emS={name:"",addr:"",contact:"",phone:"",bulstat:""};
   const [pF,  setPF]  = useState(emP);
   const [sF,  setSF]  = useState(emS);
   const [eF,  setEF]  = useState({...emP});
@@ -151,214 +150,153 @@ export default function App() {
   const [oQtys, setOQtys] = useState({});
   const [rQtys, setRQtys] = useState({});
 
-  // ── APPLY DATA ───────────────────────────────────────────
+  // ── APPLY DATA ────────────────────────────────────────────
   function applyData(d) {
     const del = d.deleted || EMPTY_DEL;
-    const delP = new Set(del.products||[]);
-    const delS = new Set(del.stores||[]);
-    const delO = new Set(del.orders||[]);
+    const delP=new Set(del.products||[]), delS=new Set(del.stores||[]), delO=new Set(del.orders||[]);
     setProducts((d.products||[]).filter(x=>!delP.has(x.id)));
     setStores(  (d.stores  ||[]).filter(x=>!delS.has(x.id)));
     setOrders(  (d.orders  ||[]).filter(x=>!delO.has(x.id)));
-    setNextId(d.nextId    || 1001);
-    setCatOrder(d.catOrder|| []);
+    setNextId(d.nextId    ||1001);
+    setCatOrder(d.catOrder||[]);
     setDeleted(del);
   }
 
-  // ── LOAD ON MOUNT ────────────────────────────────────────
-  // ── SYNC FROM REMOTE (manual + on load) ─────────────────
-  const doSync = async () => {
-    setSyncStatus("syncing");
-    try {
-      const remote = await binGet();
-      if (remote?.products !== undefined) {
-        // Remote е истината — вземаме го директно
-        // Само добавяме локални неща които remote няма (офлайн промени)
-        const local = lsGet();
-        if (local) {
-          // Запазваме tombstones от local (изтривания направени офлайн)
-          const del = {
-            products: Array.from(new Set([...(local.deleted?.products||[]),(remote.deleted?.products||[])])),
-            stores:   Array.from(new Set([...(local.deleted?.stores||[]),  ...(remote.deleted?.stores||[])])),
-            orders:   Array.from(new Set([...(local.deleted?.orders||[]),  ...(remote.deleted?.orders||[])])),
-          };
-          // Remote wins за всичко, после добавяме local-only items
-          const addLocalOnly = (rem, loc, tombstones) => {
-            const remIds = new Set((rem||[]).map(x=>x.id));
-            const localOnly = (loc||[]).filter(x=>!remIds.has(x.id)&&!tombstones.includes(x.id));
-            return [...(rem||[]), ...localOnly].sort((a,b)=>a.id-b.id);
-          };
-          const synced = {
-            products: addLocalOnly(remote.products, local.products, del.products),
-            stores:   addLocalOnly(remote.stores,   local.stores,   del.stores),
-            orders:   addLocalOnly(remote.orders,   local.orders,   del.orders),
-            nextId:   Math.max(remote.nextId||0, local.nextId||0),
-            catOrder: remote.catOrder || local.catOrder || [],
-            deleted:  del,
-          };
-          applyData(synced); lsSet(synced);
-        } else {
-          applyData(remote); lsSet(remote);
-        }
-      }
-      setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
-    } catch(e) {
-      setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),3000);
-    }
-  };
-
+  // ── LOAD ──────────────────────────────────────────────────
   useEffect(()=>{
     (async()=>{
-      const local = lsGet();
-      if(local){ applyData(local); setReady(true); }
-      await doSync();
-      setReady(true);
+      const local=lsGet();
+      if(local){ applyData(local); setReady(true); setSyncStatus("syncing"); }
+      try {
+        const remote = await sbGet();
+        if(remote?.products!==undefined){
+          const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
+          applyData(merged); lsSet(merged);
+        }
+        setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2000);
+      } catch(e){
+        setSyncStatus(local?"saved":"error"); setTimeout(()=>setSyncStatus(null),3000);
+      } finally { setReady(true); }
     })();
   },[]);
 
-  // ── AUTO-SYNC: проверява JSONBin на всеки 30 сек ────────
-  const pollRef = useRef(null);
-  const isSaving = useRef(false); // не презаписвай докато се записва
-
-  useEffect(() => {
-    if (!ready) return;
-    pollRef.current = setInterval(async () => {
-      if (isSaving.current) return; // изчакай да свърши записването
+  // ── AUTO-SYNC: polling на 30 сек (Supabase = без лимит) ──
+  useEffect(()=>{
+    if(!ready)return;
+    const iv = setInterval(async()=>{
       try {
-        const remote = await binGet();
-        if (!remote?.products) return;
+        const remote = await sbGet();
+        if(!remote?.products)return;
         const local = lsGet();
-        // Провери дали remote е по-ново (има нови неща)
-        const remoteNid  = remote.nextId || 0;
-        const localNid   = local?.nextId || 0;
-        const remoteTotal = (remote.products?.length||0) + (remote.orders?.length||0) + (remote.stores?.length||0);
-        const remoteDelTotal = (remote.deleted?.products?.length||0) + (remote.deleted?.orders?.length||0) + (remote.deleted?.stores?.length||0);
-        const localTotal  = (local?.products?.length||0)  + (local?.orders?.length||0)  + (local?.stores?.length||0);
-        const localDelTotal  = (local?.deleted?.products?.length||0)  + (local?.deleted?.orders?.length||0)  + (local?.deleted?.stores?.length||0);
-        const hasNewData = remoteNid > localNid || remoteTotal !== localTotal || remoteDelTotal !== localDelTotal;
-        if (hasNewData) {
-          const merged = mergeData(local || {products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
-          applyData(merged);
-          lsSet(merged);
-          setSyncStatus("saved");
-          setTimeout(() => setSyncStatus(null), 2000);
+        const remNid  = remote.nextId||0;
+        const locNid  = local?.nextId||0;
+        const remTotal = (remote.products?.length||0)+(remote.orders?.length||0)+(remote.stores?.length||0)+(remote.deleted?.products?.length||0)+(remote.deleted?.orders?.length||0);
+        const locTotal = (local?.products?.length||0) +(local?.orders?.length||0) +(local?.stores?.length||0) +(local?.deleted?.products?.length||0) +(local?.deleted?.orders?.length||0);
+        if(remNid>locNid || remTotal!==locTotal){
+          const merged = mergeData(local||{products:[],stores:[],orders:[],nextId:1001,catOrder:[],deleted:EMPTY_DEL}, remote);
+          applyData(merged); lsSet(merged);
+          setSyncStatus("synced"); setTimeout(()=>setSyncStatus(null),2500);
         }
-      } catch(e) { /* тихо — не показвай грешка при poll */ }
-    }, 30000); // на всеки 30 секунди
-    return () => clearInterval(pollRef.current);
-  }, [ready]);
+      } catch{}
+    }, 30000);
+    return ()=>clearInterval(iv);
+  },[ready]);
 
-  // ── PERSIST ─────────────────────────────────────────────
-  // ВАЖНО: приема del като аргумент — не ползва stale closure!
-  const timer = useRef(null);
-  const persist = useCallback((p, s, o, nid, co, del) => {
-    const data = {products:p, stores:s, orders:o, nextId:nid, catOrder:co, deleted:del};
-    lsSet(data); // веднага локално
+  // ── PERSIST ───────────────────────────────────────────────
+  const saveTimer = useRef(null);
+  const persist = useCallback((p,s,o,nid,co,del)=>{
+    const data={products:p,stores:s,orders:o,nextId:nid,catOrder:co,deleted:del};
+    lsSet(data);
     setSyncStatus("saving");
-    clearTimeout(timer.current);
-    timer.current = setTimeout(async()=>{
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async()=>{
       try {
-        // Merge with remote before saving (handles concurrent edits)
-        let remote=null; try{remote=await binGet();}catch{}
-        const toSave = remote ? mergeData(data, remote) : data;
-        lsSet(toSave);
-        await binPut(toSave);
+        await sbPut(data);
         setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),2500);
       } catch(e){
         setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),4000);
       }
-    }, 400);
+    }, 500);
   },[]);
 
-  // ── HELPERS ──────────────────────────────────────────────
+  // ── HELPERS ───────────────────────────────────────────────
   const oval   = o=>o.items.reduce((s,i)=>{const p=products.find(x=>x.id===i.pid);return s+(p?p.sellPrice*i.qty:0);},0);
   const ototal = products.reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
   const openOrder = sid=>{const q={};products.forEach(p=>q[p.id]=0);setOQtys(q);setOSid(sid||stores[0]?.id||"");setODate(new Date().toISOString().split("T")[0]);setMOrder(true);};
 
   const getOrderedCats = useCallback(()=>{
-    const fromP = Array.from(new Set(products.map(p=>p.category||"").filter(Boolean)));
-    const ordered = catOrder.filter(c=>fromP.includes(c));
-    return [...ordered, ...fromP.filter(c=>!ordered.includes(c))];
+    const fromP=Array.from(new Set(products.map(p=>p.category||"").filter(Boolean)));
+    const ordered=catOrder.filter(c=>fromP.includes(c));
+    return [...ordered,...fromP.filter(c=>!ordered.includes(c))];
   },[products,catOrder]);
 
-  const moveCat = (cat,dir)=>{
-    const list=getOrderedCats(); const idx=list.indexOf(cat);
-    if(dir===-1&&idx===0)return; if(dir===1&&idx===list.length-1)return;
-    const next=[...list]; [next[idx],next[idx+dir]]=[next[idx+dir],next[idx]];
-    setCatOrder(next); persist(products,stores,orders,nextId,next,deleted);
+  const moveCat=(cat,dir)=>{
+    const list=getOrderedCats();const idx=list.indexOf(cat);
+    if(dir===-1&&idx===0)return;if(dir===1&&idx===list.length-1)return;
+    const next=[...list];[next[idx],next[idx+dir]]=[next[idx+dir],next[idx]];
+    setCatOrder(next);persist(products,stores,orders,nextId,next,deleted);
   };
 
-  // ── CRUD ─────────────────────────────────────────────────
-  const addProd = ()=>{
+  // ── CRUD ──────────────────────────────────────────────────
+  const addProd=()=>{
     if(!pF.name.trim())return;
     const nid=products.length?Math.max(...products.map(p=>p.id))+1:1;
     const np={id:nid,name:pF.name,sku:pF.sku||`SKU-${nid}`,qty:parseInt(pF.qty)||0,buyPrice:parseFloat(pF.buy)||0,sellPrice:parseFloat(pF.sell)||0,minLevel:parseInt(pF.min)||10,image:pF.img,category:pF.cat};
     const newP=[...products,np];
-    setProducts(newP); persist(newP,stores,orders,nextId,catOrder,deleted); setPF(emP); setMProd(false);
+    setProducts(newP);persist(newP,stores,orders,nextId,catOrder,deleted);setPF(emP);setMProd(false);
   };
-
-  const openEdit = p=>{setEF({name:p.name,sku:p.sku,qty:String(p.qty),buy:String(p.buyPrice),sell:String(p.sellPrice),min:String(p.minLevel),img:p.image||"",cat:p.category||""});setMEdit(p.id);};
-  const saveEdit = ()=>{
+  const openEdit=p=>{setEF({name:p.name,sku:p.sku,qty:String(p.qty),buy:String(p.buyPrice),sell:String(p.sellPrice),min:String(p.minLevel),img:p.image||"",cat:p.category||""});setMEdit(p.id);};
+  const saveEdit=()=>{
     const newP=products.map(p=>p.id===mEdit?{...p,name:eF.name||p.name,sku:eF.sku||p.sku,qty:parseInt(eF.qty)||0,buyPrice:parseFloat(eF.buy)||0,sellPrice:parseFloat(eF.sell)||0,minLevel:parseInt(eF.min)||10,image:eF.img,category:eF.cat}:p);
-    setProducts(newP); persist(newP,stores,orders,nextId,catOrder,deleted); setMEdit(null);
+    setProducts(newP);persist(newP,stores,orders,nextId,catOrder,deleted);setMEdit(null);
   };
-
-  // DELETE — подава newDel директно на persist (без stale closure)
-  const deleteProd = id=>{
+  const deleteProd=id=>{
     const newP=products.filter(x=>x.id!==id);
     const newDel={...deleted,products:[...deleted.products,id]};
-    setProducts(newP); setDeleted(newDel);
-    persist(newP,stores,orders,nextId,catOrder,newDel);
+    setProducts(newP);setDeleted(newDel);persist(newP,stores,orders,nextId,catOrder,newDel);
   };
-
-  const addStore = ()=>{
+  const addStore=()=>{
     if(!sF.name.trim())return;
     const nid=stores.length?Math.max(...stores.map(s=>s.id))+1:1;
     const ns={id:nid,name:sF.name,address:sF.addr,contact:sF.contact,phone:sF.phone,bulstat:sF.bulstat};
     const newS=[...stores,ns];
-    setStores(newS); persist(products,newS,orders,nextId,catOrder,deleted); setSF(emS); setMStore(false);
+    setStores(newS);persist(products,newS,orders,nextId,catOrder,deleted);setSF(emS);setMStore(false);
   };
-  const openStoreEdit = s=>{setESF({name:s.name,addr:s.address,contact:s.contact,phone:s.phone,bulstat:s.bulstat||""});setMStoreEdit(s.id);};
-  const saveStoreEdit = ()=>{
+  const openStoreEdit=s=>{setESF({name:s.name,addr:s.address,contact:s.contact,phone:s.phone,bulstat:s.bulstat||""});setMStoreEdit(s.id);};
+  const saveStoreEdit=()=>{
     const newS=stores.map(s=>s.id===mStoreEdit?{...s,name:eSF.name||s.name,address:eSF.addr,contact:eSF.contact,phone:eSF.phone,bulstat:eSF.bulstat}:s);
-    setStores(newS); persist(products,newS,orders,nextId,catOrder,deleted); setMStoreEdit(null);
+    setStores(newS);persist(products,newS,orders,nextId,catOrder,deleted);setMStoreEdit(null);
   };
-  const deleteStore = id=>{
+  const deleteStore=id=>{
     const newS=stores.filter(x=>x.id!==id);
     const newDel={...deleted,stores:[...deleted.stores,id]};
-    setStores(newS); setDeleted(newDel);
-    persist(products,newS,orders,nextId,catOrder,newDel);
+    setStores(newS);setDeleted(newDel);persist(products,newS,orders,nextId,catOrder,newDel);
   };
-
-  const submitOrder = ()=>{
+  const submitOrder=()=>{
     const items=products.filter(p=>oQtys[p.id]>0).map(p=>({pid:p.id,qty:oQtys[p.id]}));
     if(!items.length)return;
     const sid=parseInt(oSid);
     const newO=[...orders,{id:nextId,storeId:sid,date:oDate,status:"pending",items}];
     const newP=products.map(p=>({...p,qty:Math.max(0,p.qty-(oQtys[p.id]||0))}));
     const newNid=nextId+1;
-    setOrders(newO); setProducts(newP); setNextId(newNid);
-    persist(newP,stores,newO,newNid,catOrder,deleted); setMOrder(false); setPage("orders");
+    setOrders(newO);setProducts(newP);setNextId(newNid);
+    persist(newP,stores,newO,newNid,catOrder,deleted);setMOrder(false);setPage("orders");
   };
-
-  const applyRestock = ()=>{
+  const applyRestock=()=>{
     const newP=products.map(p=>({...p,qty:p.qty+(rQtys[p.id]||0)}));
-    setProducts(newP); persist(newP,stores,orders,nextId,catOrder,deleted); setMRestock(false);
+    setProducts(newP);persist(newP,stores,orders,nextId,catOrder,deleted);setMRestock(false);
   };
-
-  const deliverOrder = id=>{
+  const deliverOrder=id=>{
     const newO=orders.map(x=>x.id===id?{...x,status:"done"}:x);
-    setOrders(newO); persist(products,stores,newO,nextId,catOrder,deleted);
+    setOrders(newO);persist(products,stores,newO,nextId,catOrder,deleted);
   };
-
-  const deleteOrder = id=>{
+  const deleteOrder=id=>{
     const newO=orders.filter(x=>x.id!==id);
     const newDel={...deleted,orders:[...deleted.orders,id]};
-    setOrders(newO); setDeleted(newDel);
-    persist(products,stores,newO,nextId,catOrder,newDel);
+    setOrders(newO);setDeleted(newDel);persist(products,stores,newO,nextId,catOrder,newDel);
   };
 
-  // ── LOADING ──────────────────────────────────────────────
+  // ── LOADING ───────────────────────────────────────────────
   if(!ready)return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0f0f14",color:"#e8e8f0",gap:20}}>
       <style>{`@keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}`}</style>
@@ -382,7 +320,7 @@ export default function App() {
     return list;
   })();
 
-  // ── DASHBOARD ────────────────────────────────────────────
+  // ── DASHBOARD ─────────────────────────────────────────────
   const Dashboard=()=>{
     const tqty=products.reduce((s,p)=>s+p.qty,0);
     const tval=products.reduce((s,p)=>s+p.qty*p.buyPrice,0);
@@ -442,14 +380,13 @@ export default function App() {
     );
   };
 
-  // ── INVENTORY ────────────────────────────────────────────
+  // ── INVENTORY ─────────────────────────────────────────────
   const Inventory=()=>(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",gap:8}}>
         <Btn v="sec" sm style={{flex:1}} onClick={()=>{const q={};products.forEach(p=>q[p.id]=0);setRQtys(q);setMRestock(true);}}>📥 Зареди</Btn>
         <Btn sm style={{flex:1}} onClick={()=>setMProd(true)}>＋ Нов</Btn>
       </div>
-      {/* SORT */}
       <div style={{...card,padding:"12px 14px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}} onClick={()=>setShowSort(s=>!s)}>
           <div style={{fontSize:"0.80rem",fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
@@ -473,7 +410,6 @@ export default function App() {
           </div>
         )}
       </div>
-      {/* CATEGORY PILLS */}
       {orderedCats.length>0&&(
         <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
           {["Всички",...orderedCats].map(cat=>(
@@ -484,14 +420,13 @@ export default function App() {
           ))}
         </div>
       )}
-      {/* CAT REORDER PANEL */}
       {showCatEdit&&orderedCats.length>0&&(
         <div style={{...card,padding:"14px 16px"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
             <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.88rem"}}>↕ Ред на категории</div>
             <button onClick={()=>setShowCatEdit(false)} style={{background:"none",border:"none",color:"#8888a0",cursor:"pointer",fontSize:"1.1rem"}}>✕</button>
           </div>
-          <div style={{fontSize:"0.70rem",color:"#8888a0",marginBottom:10}}>Натисни ↑ ↓ — първите се показват вляво</div>
+          <div style={{fontSize:"0.70rem",color:"#8888a0",marginBottom:10}}>Натисни ↑ ↓ — първите излизат вляво</div>
           {orderedCats.map((cat,idx)=>(
             <div key={cat} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a24",borderRadius:10,padding:"10px 14px",marginBottom:7}}>
               <div style={{fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1rem",color:"#f0c040",minWidth:22}}>{idx+1}</div>
@@ -505,14 +440,13 @@ export default function App() {
           <Btn full v="sec" onClick={()=>setShowCatEdit(false)}>✓ Готово</Btn>
         </div>
       )}
-      {/* PRODUCT CARDS */}
       {products.length===0?<div style={{...card,padding:40,textAlign:"center",color:"#8888a0"}}>Няма продукти. Натисни „+ Нов".</div>:
         visibleProducts.map(p=>{
           const st=p.qty===0?"out":p.qty<=p.minLevel?"low":"ok";
           const bc=st==="ok"?"#4ade80":st==="low"?"#fb923c":"#f87171";
           const pct=p.minLevel>0?Math.min(100,Math.round(p.qty/(p.minLevel*3)*100)):100;
           return(
-            <div key={p.id} style={{...card,overflow:"hidden",marginBottom:0}}>
+            <div key={p.id} style={{...card,overflow:"hidden"}}>
               <div style={{height:150,background:"#1a1a24",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
                 {p.image?<img src={p.image} alt={p.name} onError={e=>e.target.style.display="none"} style={{width:"100%",height:"100%",objectFit:"cover"}} />:<div style={{fontSize:"4.5rem"}}>{EMOJIS[(p.id-1)%EMOJIS.length]||"📦"}</div>}
                 <div style={{position:"absolute",top:10,right:10}}><Badge t={st}>{st==="ok"?"ОК":st==="low"?"Нисък":"Изчерпан"}</Badge></div>
@@ -545,7 +479,7 @@ export default function App() {
     </div>
   );
 
-  // ── ORDERS ───────────────────────────────────────────────
+  // ── ORDERS ────────────────────────────────────────────────
   const Orders=()=>{
     const [expanded,setExpanded]=useState({});
     const toggle=id=>setExpanded(e=>({...e,[id]:!e[id]}));
@@ -598,7 +532,7 @@ export default function App() {
     );
   };
 
-  // ── STORES ───────────────────────────────────────────────
+  // ── STORES ────────────────────────────────────────────────
   const Stores=()=>(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <Btn full onClick={()=>setMStore(true)}>＋ Нов обект</Btn>
@@ -619,11 +553,11 @@ export default function App() {
               </div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:7}}>
-              {s.address&&<div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:"1rem",flexShrink:0}}>📍</span><span style={{fontSize:"0.84rem"}}>{s.address}</span></div>}
-              {s.contact&&<div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:"1rem",flexShrink:0}}>👤</span><span style={{fontSize:"0.84rem"}}>{s.contact}</span></div>}
-              {s.phone&&<div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:"1rem",flexShrink:0}}>📞</span><span style={{fontSize:"0.84rem"}}>{s.phone}</span></div>}
-              {s.bulstat&&<div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:"1rem",flexShrink:0}}>🏢</span><span style={{fontSize:"0.84rem",color:"#8888a0"}}>Булстат: </span><span style={{fontSize:"0.84rem",fontFamily:"Syne,sans-serif",fontWeight:600}}>{s.bulstat}</span></div>}
-              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}><span style={{fontSize:"1rem",flexShrink:0}}>📋</span><span style={{fontSize:"0.80rem",color:"#8888a0"}}>{totalOrd} общо заявки</span></div>
+              {s.address&&<div style={{display:"flex",alignItems:"center",gap:8}}><span>📍</span><span style={{fontSize:"0.84rem"}}>{s.address}</span></div>}
+              {s.contact&&<div style={{display:"flex",alignItems:"center",gap:8}}><span>👤</span><span style={{fontSize:"0.84rem"}}>{s.contact}</span></div>}
+              {s.phone&&<div style={{display:"flex",alignItems:"center",gap:8}}><span>📞</span><span style={{fontSize:"0.84rem"}}>{s.phone}</span></div>}
+              {s.bulstat&&<div style={{display:"flex",alignItems:"center",gap:8}}><span>🏢</span><span style={{fontSize:"0.84rem",color:"#8888a0"}}>Булстат: </span><span style={{fontSize:"0.84rem",fontFamily:"Syne,sans-serif",fontWeight:600}}>{s.bulstat}</span></div>}
+              <div style={{display:"flex",alignItems:"center",gap:8}}><span>📋</span><span style={{fontSize:"0.80rem",color:"#8888a0"}}>{totalOrd} общо заявки</span></div>
             </div>
             <div style={{marginTop:14}}><Btn full onClick={()=>openOrder(s.id)}>＋ Нова заявка</Btn></div>
           </div>
@@ -637,7 +571,6 @@ export default function App() {
   return(
     <div style={{display:"flex",flexDirection:"column",minHeight:"100vh",background:"#0f0f14",color:"#e8e8f0",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{-webkit-tap-highlight-color:transparent;}input,select{-webkit-appearance:none;}@keyframes bounce{0%,80%,100%{transform:scale(0.7);opacity:0.3}40%{transform:scale(1.2);opacity:1}}`}</style>
-
       <header style={{background:"#16161e",borderBottom:"1px solid #2a2a38",padding:"0 16px",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,flexShrink:0}}>
         <div style={{fontFamily:"Syne,sans-serif",fontWeight:800,fontSize:"1.15rem"}}><span style={{color:"#f0c040"}}>Хабитат</span><span style={{color:"#e8e8f0"}}>-64</span></div>
         <div style={{fontSize:"0.78rem",color:"#8888a0"}}>{navItems.find(n=>n.id===page)?.lbl}</div>
@@ -648,16 +581,13 @@ export default function App() {
           {page==="dashboard"&&<div style={{width:42}} />}
         </div>
       </header>
-
       <StatusBar status={syncStatus} />
-
       <main style={{flex:1,padding:"16px 14px 90px",overflowY:"auto"}}>
         {page==="dashboard"&&<Dashboard/>}
         {page==="inventory"&&<Inventory/>}
         {page==="orders"   &&<Orders/>}
         {page==="stores"   &&<Stores/>}
       </main>
-
       <nav style={{position:"fixed",bottom:0,left:0,right:0,background:"#16161e",borderTop:"1px solid #2a2a38",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
         {navItems.map(n=>(
           <button key={n.id} onClick={()=>setPage(n.id)} style={{flex:1,background:"none",border:"none",color:page===n.id?"#f0c040":"#8888a0",cursor:"pointer",padding:"10px 4px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontFamily:"'DM Sans',sans-serif"}}>
