@@ -225,10 +225,11 @@ export default function App() {
   // ── CRUD ──────────────────────────────────────────────────
   const addProd=()=>{
     if(!pF.name.trim())return;
-    const nid=products.length?Math.max(...products.map(p=>p.id))+1:1;
+    const nid=nextId; // използва nextId за да избегне изтрити ID-та
+    const newNid=nextId+1;
     const np={id:nid,name:pF.name,sku:pF.sku||`SKU-${nid}`,qty:parseInt(pF.qty)||0,buyPrice:parseFloat(pF.buy)||0,sellPrice:parseFloat(pF.sell)||0,minLevel:parseInt(pF.min)||10,image:pF.img,category:pF.cat};
     const newP=[...products,np];
-    setProducts(newP);persist(newP,stores,orders,nextId,catOrder,deleted);setPF(emP);setMProd(false);
+    setProducts(newP);setNextId(newNid);persist(newP,stores,orders,newNid,catOrder,deleted);setPF(emP);setMProd(false);
   };
   const openEdit=p=>{setEF({name:p.name,sku:p.sku,qty:String(p.qty),buy:String(p.buyPrice),sell:String(p.sellPrice),min:String(p.minLevel),img:p.image||"",cat:p.category||""});setMEdit(p.id);};
   const saveEdit=()=>{
