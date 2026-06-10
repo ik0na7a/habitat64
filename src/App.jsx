@@ -7,8 +7,8 @@ const SB_HDR = { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content
 
 async function sbGet() {
   const r = await fetch(
-    `${SB_URL}/rest/v1/appdata?id=eq.main&select=data&_=${Date.now()}`,
-    { headers: SB_HDR, cache: "no-store" }
+    `${SB_URL}/rest/v1/appdata?id=eq.main&select=data&t=${Date.now()}`,
+    { headers: { ...SB_HDR, "Accept": "application/json" } }
   );
   if (!r.ok) throw new Error(r.status);
   const rows = await r.json();
@@ -70,7 +70,7 @@ function StatusBar({status}){
     saving:  {bg:"rgba(240,192,64,0.95)",  color:"#0f0f14", text:"💾 Запазва се..."},
     saved:   {bg:"rgba(74,222,128,0.95)",  color:"#0f0f14", text:"✓ Запазено"},
     synced:  {bg:"rgba(78,205,196,0.95)",  color:"#0f0f14", text:"🔄 Обновено"},
-    error:   {bg:"rgba(248,113,113,0.95)", color:"#fff",    text:"⚠ Проблем — провери връзката"},
+    error:   {bg:"rgba(248,113,113,0.95)", color:"#fff",    text:"⚠ Supabase грешка — виж конзолата"},
   };
   if(!status||!cfg[status])return null;
   const c=cfg[status];
@@ -152,6 +152,7 @@ export default function App() {
         applyData(data);
         setSyncStatus("saved"); setTimeout(()=>setSyncStatus(null),1500);
       } catch(e){
+        console.error("sbGet error:", e);
         setSyncStatus("error"); setTimeout(()=>setSyncStatus(null),5000);
       } finally {
         setReady(true);
