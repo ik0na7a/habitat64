@@ -97,6 +97,76 @@ function HoldBtn({onDelete, label="✕ Изтрий", full}) {
   );
 }
 
+
+// ── ORDER PRODUCT PICKER (категории с разпъване) ─────────────
+function OrderProductPicker({ products, oQtys, setOQtys, orderedCats, fmt }) {
+  const [openCats, setOpenCats] = useState({});
+  const toggleCat = cat => setOpenCats(s=>({...s,[cat]:!s[cat]}));
+
+  // Групирай продуктите по категория
+  const cats = [...orderedCats];
+  const noCat = products.filter(p=>!(p.category||"").trim());
+  if(noCat.length) cats.push("__none__");
+
+  const prodsByCat = cat =>
+    cat==="__none__"
+      ? noCat
+      : products.filter(p=>(p.category||"").trim()===cat);
+
+  const catTotal = cat => prodsByCat(cat).reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
+  const catQty   = cat => prodsByCat(cat).reduce((s,p)=>s+(oQtys[p.id]||0),0);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{fontSize:"0.68rem",color:"#8888a0",textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:4}}>Избери продукти по категория</div>
+      {cats.map(cat=>{
+        const prods=prodsByCat(cat);
+        if(!prods.length)return null;
+        const isOpen=!!openCats[cat];
+        const qty=catQty(cat);
+        const label=cat==="__none__"?"Без категория":cat;
+        return(
+          <div key={cat} style={{background:"#1a1a24",borderRadius:12,overflow:"hidden",border:`1px solid ${qty>0?"rgba(240,192,64,0.4)":"#2a2a38"}`}}>
+            {/* Категория хедър */}
+            <div onClick={()=>toggleCat(cat)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",cursor:"pointer"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.90rem",color:qty>0?"#f0c040":"#e8e8f0"}}>{label}</div>
+                <div style={{fontSize:"0.70rem",color:"#8888a0"}}>{prods.length} арт.</div>
+                {qty>0&&<div style={{background:"rgba(240,192,64,0.15)",color:"#f0c040",borderRadius:20,padding:"2px 10px",fontSize:"0.70rem",fontWeight:700}}>×{qty} · {fmt(catTotal(cat))}</div>}
+              </div>
+              <span style={{color:"#8888a0",fontSize:"0.8rem",display:"inline-block",transition:"transform 0.2s",transform:isOpen?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+            </div>
+            {/* Продукти */}
+            {isOpen&&(
+              <div style={{borderTop:"1px solid #2a2a38",padding:"10px 12px",display:"flex",flexDirection:"column",gap:10}}>
+                {prods.map(p=>(
+                  <div key={p.id} style={{background:"#0f0f14",borderRadius:10,padding:"10px 12px",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.45)":"transparent"}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:600,fontSize:"0.84rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                        <div style={{fontSize:"0.67rem",color:"#8888a0"}}>Склад: {p.qty} бр. · {fmt(p.sellPrice)}/бр.</div>
+                        {(oQtys[p.id]||0)>0&&<div style={{fontSize:"0.72rem",color:"#f0c040",fontWeight:600}}>= {fmt((oQtys[p.id]||0)*p.sellPrice)}</div>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.max(0,(q[p.id]||0)-1)}))} style={{width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>−</button>
+                      <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max={p.qty}
+                        value={oQtys[p.id]||0}
+                        onChange={e=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,Math.max(0,parseInt(e.target.value)||0))}))}
+                        style={{flex:1,background:"#16161e",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:(oQtys[p.id]||0)>0?"#f0c040":"#e8e8f0",borderRadius:10,padding:"10px",fontFamily:"Syne,sans-serif",fontSize:"1.2rem",fontWeight:800,outline:"none",textAlign:"center"}} />
+                      <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,(q[p.id]||0)+1)}))} style={{width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════
 export default function App() {
   const [ready,      setReady]      = useState(false);
@@ -112,6 +182,7 @@ export default function App() {
   const [mProd,      setMProd]      = useState(false);
   const [mStore,     setMStore]     = useState(false);
   const [mOrder,     setMOrder]     = useState(false);
+  const [mEditOrder, setMEditOrder] = useState(null); // заявка за редакция
   const [mRestock,   setMRestock]   = useState(false);
   const [mEdit,      setMEdit]      = useState(null);
   const [mStoreEdit, setMStoreEdit] = useState(null);
@@ -207,7 +278,15 @@ export default function App() {
   const oval = o=>o.items.reduce((s,i)=>{const p=products.find(x=>x.id===i.pid);return s+(p?p.sellPrice*i.qty:0);},0);
   const ototal = products.reduce((s,p)=>s+(oQtys[p.id]||0)*p.sellPrice,0);
 
-  const openOrder = sid=>{const q={};products.forEach(p=>q[p.id]=0);setOQtys(q);setOSid(sid||stores[0]?.id||"");setODate(new Date().toISOString().split("T")[0]);setMOrder(true);};
+  const openOrder = sid=>{const q={};products.forEach(p=>q[p.id]=0);setOQtys(q);setOSid(sid||stores[0]?.id||"");setODate(new Date().toISOString().split("T")[0]);setMEditOrder(null);setMOrder(true);};
+
+  const openEditOrder = order=>{
+    // Предзапълни modal-а с данните на заявката
+    const q={};products.forEach(p=>q[p.id]=0);
+    order.items.forEach(i=>q[i.pid]=i.qty);
+    setOQtys(q);setOSid(String(order.storeId));setODate(order.date);
+    setMEditOrder(order);setMOrder(true);
+  };
 
   const getOrderedCats = useCallback(()=>{
     const fromP=Array.from(new Set(products.map(p=>p.category||"").filter(Boolean)));
@@ -262,11 +341,25 @@ export default function App() {
     const items=products.filter(p=>oQtys[p.id]>0).map(p=>({pid:p.id,qty:oQtys[p.id]}));
     if(!items.length)return;
     const sid=parseInt(oSid);
-    const newO=[...orders,{id:nextId,storeId:sid,date:oDate,status:"pending",items}];
-    const newP=products.map(p=>({...p,qty:Math.max(0,p.qty-(oQtys[p.id]||0))}));
-    const newNid=nextId+1;
-    setOrders(newO);setProducts(newP);setNextId(newNid);
-    persist(newP,stores,newO,newNid,catOrder,deleted);setMOrder(false);setPage("orders");
+    if(mEditOrder){
+      // РЕДАКЦИЯ: върни старите количества, извади новите
+      let newP=products.map(p=>{
+        const old=mEditOrder.items.find(i=>i.pid===p.id);
+        const nw=oQtys[p.id]||0;
+        const restored=old?p.qty+old.qty:p.qty;
+        return {...p,qty:Math.max(0,restored-nw)};
+      });
+      const newO=orders.map(o=>o.id===mEditOrder.id?{...o,storeId:sid,date:oDate,items}:o);
+      setOrders(newO);setProducts(newP);
+      persist(newP,stores,newO,nextId,catOrder,deleted);setMOrder(false);setMEditOrder(null);
+    } else {
+      // НОВА заявка
+      const newO=[...orders,{id:nextId,storeId:sid,date:oDate,status:"pending",items}];
+      const newP=products.map(p=>({...p,qty:Math.max(0,p.qty-(oQtys[p.id]||0))}));
+      const newNid=nextId+1;
+      setOrders(newO);setProducts(newP);setNextId(newNid);
+      persist(newP,stores,newO,newNid,catOrder,deleted);setMOrder(false);setPage("orders");
+    }
   };
   const applyRestock=()=>{
     const newP=products.map(p=>({...p,qty:p.qty+(rQtys[p.id]||0)}));
@@ -277,9 +370,19 @@ export default function App() {
     setOrders(newO);persist(products,stores,newO,nextId,catOrder,deleted);
   };
   const deleteOrder=id=>{
+    const order=orders.find(x=>x.id===id);
     const newO=orders.filter(x=>x.id!==id);
     const newDel={...deleted,orders:[...deleted.orders,id]};
-    setOrders(newO);setDeleted(newDel);persist(products,stores,newO,nextId,catOrder,newDel);
+    // Върни продуктите в склада ако заявката е чакаща
+    let newP=products;
+    if(order&&order.status==="pending"){
+      newP=products.map(p=>{
+        const item=order.items.find(i=>i.pid===p.id);
+        return item?{...p,qty:p.qty+item.qty}:p;
+      });
+      setProducts(newP);
+    }
+    setOrders(newO);setDeleted(newDel);persist(newP,stores,newO,nextId,catOrder,newDel);
   };
 
   // ── LOADING ───────────────────────────────────────────────
@@ -504,6 +607,7 @@ export default function App() {
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                   <span style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"1rem",color:"#f0c040"}}>{fmt(oval(o))}</span>
                   <div style={{display:"flex",gap:7}}>
+                    {!isDone&&<Btn v="edit" sm onClick={()=>openEditOrder(o)}>✏️</Btn>}
                     {!isDone&&<Btn v="teal" sm onClick={()=>deliverOrder(o.id)}>✓ Доставена</Btn>}
                     <HoldBtn onDelete={()=>deleteOrder(o.id)} label="✕" />
                   </div>
@@ -666,34 +770,12 @@ export default function App() {
       </Modal>
 
       {/* НОВА ЗАЯВКА */}
-      <Modal open={mOrder} onClose={()=>setMOrder(false)} title="📋 Нова заявка"
-        footer={[<Btn key="s" full onClick={submitOrder}>✓ Изпрати — {fmt(ototal)}</Btn>,<Btn key="c" v="sec" full onClick={()=>setMOrder(false)}>Отказ</Btn>]}>
+      <Modal open={mOrder} onClose={()=>{setMOrder(false);setMEditOrder(null);}} title={mEditOrder?"✏️ Редактирай заявка":"📋 Нова заявка"}
+        footer={[<Btn key="s" full onClick={submitOrder}>{mEditOrder?"✓ Запази промените":"✓ Изпрати"} — {fmt(ototal)}</Btn>,<Btn key="c" v="sec" full onClick={()=>{setMOrder(false);setMEditOrder(null);}}>Отказ</Btn>]}>
         <FG label="Обект"><select value={oSid} onChange={e=>setOSid(e.target.value)} style={IS}>{stores.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></FG>
         <FG label="Дата"><input style={IS} type="date" value={oDate} onChange={e=>setODate(e.target.value)} /></FG>
         {oSid&&(()=>{const s=stores.find(x=>x.id==oSid);return s?(<div style={{background:"rgba(240,192,64,0.08)",border:"1px solid rgba(240,192,64,0.24)",borderRadius:10,padding:"9px 12px",marginBottom:14}}><div style={{fontFamily:"Syne,sans-serif",fontWeight:700,fontSize:"0.86rem"}}>{s.name}</div><div style={{fontSize:"0.68rem",color:"#8888a0"}}>📍 {s.address} · 👤 {s.contact}</div></div>):null;})()}
-        <div style={{fontSize:"0.68rem",color:"#8888a0",textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:10}}>Избери продукти</div>
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {products.map(p=>(
-            <div key={p.id} style={{background:"#1a1a24",borderRadius:11,padding:"10px 12px",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.45)":"transparent"}`}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                <Thumb p={p} size={42} />
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:600,fontSize:"0.84rem",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
-                  <div style={{fontSize:"0.67rem",color:"#8888a0"}}>Склад: {p.qty} бр. · {fmt(p.sellPrice)}/бр.</div>
-                  {(oQtys[p.id]||0)>0&&<div style={{fontSize:"0.72rem",color:"#f0c040",fontWeight:600}}>= {fmt((oQtys[p.id]||0)*p.sellPrice)}</div>}
-                </div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.max(0,(q[p.id]||0)-1)}))} style={{width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>−</button>
-                <input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max={p.qty}
-                  value={oQtys[p.id]||0}
-                  onChange={e=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,Math.max(0,parseInt(e.target.value)||0))}))}
-                  style={{flex:1,background:"#0f0f14",border:`1px solid ${(oQtys[p.id]||0)>0?"rgba(240,192,64,0.5)":"#2a2a38"}`,color:(oQtys[p.id]||0)>0?"#f0c040":"#e8e8f0",borderRadius:10,padding:"10px",fontFamily:"Syne,sans-serif",fontSize:"1.2rem",fontWeight:800,outline:"none",textAlign:"center"}} />
-                <button onClick={()=>setOQtys(q=>({...q,[p.id]:Math.min(p.qty,(q[p.id]||0)+1)}))} style={{width:44,height:44,background:"#2a2a38",border:"none",color:"#e8e8f0",borderRadius:10,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>+</button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <OrderProductPicker products={products} oQtys={oQtys} setOQtys={setOQtys} orderedCats={orderedCats} fmt={fmt} />
       </Modal>
     </div>
   );
